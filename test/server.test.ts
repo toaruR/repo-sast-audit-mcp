@@ -86,7 +86,7 @@ test("tools/list over stdio returns exactly the 6 tools", async () => {
   await client.connect(transport);
   try {
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    assert.deepStrictEqual(names, ["cancel_scan", "generate_report", "get_findings", "get_scan_status", "list_scanners", "scan_repository"]);
+    assert.deepStrictEqual(names, ["cancel_scan", "generate_report", "get_findings", "get_scan_status", "list_scanners", "scan_repository", "update_advisory_db"]);
   } finally {
     await client.close();
   }

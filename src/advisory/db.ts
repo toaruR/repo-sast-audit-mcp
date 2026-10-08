@@ -74,7 +74,7 @@ export interface LoadOptions {
   staleDays?: number;
 }
 
-function safeSegment(s: string): string {
+export function safeSegment(s: string): string {
   return encodeURIComponent(s).replace(/\./g, "%2E");
 }
 

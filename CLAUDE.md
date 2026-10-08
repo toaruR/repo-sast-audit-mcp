@@ -61,4 +61,6 @@ The following protocol applies **ONLY during `strict-goal` workflows** (e.g., re
 - **strict-goal implement 開始前に git の基準コミットを作る**: コミットが無いと `no_test_weakening` / `no_unplanned_change` の diff を取れず、verifier が 8 点止まりになって FINAL に届かない（rl_01M4CPXHVG89X9J6CD0E3CSXYE で発生）。
 - **strict-goal plan の JSON スキーマは厳格（違反は commit 前に `E_PLAN_SCHEMA`）**: top-level は `plan_version, summary, tasks` のみ。task は `id`(`^T[0-9]{3}$`), `title`, `intent`(≤2000字), `depends_on`, `design_refs`, `changes[{path, kind: add|modify|delete}]`, `acceptance`, `verify[{command, expect_exit_code}]`, `estimate_rounds`。`summary` ≤4000字。
 - **同梱アセットやワーカーのパスを `import.meta.url` からの相対パス（`../schemas` など）や cwd 基準で解決しない**: `src/`（tsx）と `dist/src/`（tsc）では階層が違い、グローバル登録すると cwd はスキャン対象のプロジェクトになる。アセットは `assetPath()`（`src/assets.ts`、package.json まで遡る）を使う。ワーカーは拡張子で `worker.ts`/`worker.js` を切り替え、tsx は `import.meta.resolve("tsx")` で解決する。
+- **Windows で書き込み直後のディレクトリを `renameSync` すると EPERM/EACCES/EBUSY になることがある**: Defender やインデクサが新規ファイルを掴むため（テストでも散発的に再現）。`src/advisory/update.ts` の `renameRetry()` のようにバックオフ付きでリトライする。
+- **OSV の `MAL-*` レコードは Defender に検疫される**: 実マルウェア断片を含むため。展開した元データや DB シャードが消えると、該当パッケージの検出が無警告で抜ける（シャード欠落は「該当なし」扱い）。
 <!-- knowledge-kit:end section=gotchas -->

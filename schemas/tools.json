@@ -525,5 +525,139 @@
         }
       }
     }
+  },
+  "update_advisory_db": {
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "start",
+            "status"
+          ]
+        },
+        "ecosystems": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "npm",
+              "PyPI",
+              "crates.io",
+              "Go",
+              "Maven"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "includeMalware": {
+          "type": "boolean"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "state",
+        "started"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "idle",
+            "running",
+            "completed",
+            "failed"
+          ]
+        },
+        "started": {
+          "type": "boolean"
+        },
+        "options": {
+          "type": "object",
+          "required": [
+            "ecosystems",
+            "includeMalware"
+          ],
+          "properties": {
+            "ecosystems": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "npm",
+                  "PyPI",
+                  "crates.io",
+                  "Go",
+                  "Maven"
+                ]
+              }
+            },
+            "includeMalware": {
+              "type": "boolean"
+            }
+          }
+        },
+        "progress": {
+          "type": "object",
+          "required": [
+            "phase",
+            "ecosystemsDone",
+            "ecosystemsTotal"
+          ],
+          "properties": {
+            "phase": {
+              "enum": [
+                "download",
+                "index",
+                "write",
+                "swap"
+              ]
+            },
+            "ecosystem": {
+              "type": "string"
+            },
+            "ecosystemsDone": {
+              "$ref": "d#/N"
+            },
+            "ecosystemsTotal": {
+              "$ref": "d#/N"
+            }
+          }
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "finishedAt": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object",
+          "required": [
+            "generatedAt",
+            "advisories",
+            "shards",
+            "unparsable"
+          ],
+          "properties": {
+            "generatedAt": {
+              "type": "string"
+            },
+            "advisories": {
+              "$ref": "d#/N"
+            },
+            "shards": {
+              "$ref": "d#/N"
+            },
+            "unparsable": {
+              "$ref": "d#/N"
+            }
+          }
+        },
+        "error": {
+          "$ref": "d#/Err"
+        }
+      }
+    }
   }
 }

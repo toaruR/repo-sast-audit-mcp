@@ -12,6 +12,7 @@ import { getFindings } from "./tools/getFindings.js";
 import { listScannersTool } from "./tools/listScanners.js";
 import { scanRepository } from "./tools/scan.js";
 import { cancelScan, getScanStatus } from "./tools/status.js";
+import { AdvisoryDbUpdater, updateAdvisoryDbTool } from "./tools/updateAdvisoryDb.js";
 
 export const SERVER_VERSION = "0.1.0";
 
@@ -23,6 +24,7 @@ export interface ServerDeps {
   serverVersion?: string;
   /** Log sink (one line, no newline). Defaults to stderr. */
   log?: (line: string) => void;
+  updater?: AdvisoryDbUpdater;
   /** Test hook: replaces individual tool handlers. */
   handlers?: Partial<Record<ToolName, ToolHandler>>;
 }
@@ -34,6 +36,8 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   get_findings: "Page through the findings of a scan.",
   generate_report: "Write md/json/sarif reports of a finished scan.",
   list_scanners: "List scanners, ruleset hash, advisory DB state and limits.",
+  update_advisory_db:
+    "Rebuild the offline advisory DB from OSV dumps (async; needs SAST_AUDIT_MCP_ALLOW_NETWORK; poll with action \"status\").",
 };
 
 function readSchemas(name: string): Record<string, unknown> {
@@ -102,6 +106,7 @@ export function createServer(manager: JobManager = new JobManager(), deps: Serve
       process.stderr.write(`${line}\n`);
     });
 
+  const updater = deps.updater ?? new AdvisoryDbUpdater();
   const handlers: Record<ToolName, ToolHandler> = {
     scan_repository: (a) => scanRepository(manager, a, toolDeps),
     get_scan_status: (a) => getScanStatus(manager, a),
@@ -109,6 +114,7 @@ export function createServer(manager: JobManager = new JobManager(), deps: Serve
     get_findings: (a) => getFindings(manager, a),
     generate_report: (a) => generateReport(manager, a, toolDeps),
     list_scanners: (a) => listScannersTool(a, deps.serverVersion !== undefined ? { serverVersion: deps.serverVersion } : {}),
+    update_advisory_db: (a) => updateAdvisoryDbTool(updater, a),
     ...deps.handlers,
   };
 

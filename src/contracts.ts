@@ -4,7 +4,7 @@ import { assetPath } from "./assets.js";
 import { LIMITS } from "./constants.js";
 
 // Tool contracts (design 3). Schemas live in schemas/defs.json ($id "d") and schemas/tools.json.
-export const TOOL_NAMES = ["scan_repository", "get_scan_status", "cancel_scan", "get_findings", "generate_report", "list_scanners"] as const;
+export const TOOL_NAMES = ["scan_repository", "get_scan_status", "cancel_scan", "get_findings", "generate_report", "list_scanners", "update_advisory_db"] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
 

@@ -2,7 +2,7 @@
 
 > **Status: prototype.** APIs, tool schemas, rule set, and environment variables may change without notice. Not intended for production use.
 
-Fast, read-only static analysis / secret / dependency audit MCP server with SARIF output (stdio, Node `>=20.11 <23`, ESM TypeScript). Design: [docs/design-repo-sast-audit-mcp.md](docs/design-repo-sast-audit-mcp.md).
+Fast, read-only static analysis / secret / dependency audit MCP server with SARIF output (stdio, Node `>=20.11 <23`, ESM TypeScript). Design: [docs/design-repo-sast-audit-mcp.md](docs/design-repo-sast-audit-mcp.md). 日本語: [README.ja.md](README.ja.md).
 Note: `ajv` is consumed as the MCP SDK's own pinned dependency (hoisted), not declared directly.
 
 ## Run
@@ -32,6 +32,12 @@ cd /path/to/repo-sast-audit-mcp && npm ci && npm run build
 claude mcp add --scope user repo-sast-audit -- node /path/to/repo-sast-audit-mcp/dist/src/index.js
 ```
 
+To use the advisory DB and `update_advisory_db`, register with environment variables (`-e` goes after the server name):
+
+```sh
+claude mcp add --scope user repo-sast-audit   -e SAST_AUDIT_MCP_ADVISORY_DB=/path/to/advisory-db   -e SAST_AUDIT_MCP_ALLOW_NETWORK=1   -- node /path/to/repo-sast-audit-mcp/dist/src/index.js
+```
+
 **Project scope** only when one project needs different settings (e.g. online OSV lookups or a specific advisory DB). Example `.mcp.json` at the project root:
 
 ```json
@@ -52,7 +58,7 @@ claude mcp add --scope user repo-sast-audit -- node /path/to/repo-sast-audit-mcp
 
 Clients that do not start servers in the project directory (e.g. Claude Desktop) must set `SAST_AUDIT_MCP_ALLOWED_ROOTS` explicitly (absolute paths, separated by `;` on Windows and `:` elsewhere); otherwise every `repoPath` fails with `E_PATH_TRAVERSAL`.
 
-## Tools (6)
+## Tools (7)
 
 Input/output JSON Schemas: `schemas/tools.json` (+ `schemas/defs.json`), validated with Ajv via `src/contracts.ts`. Every result is `structuredContent`; failures are `isError: true` with `structuredContent.error = { code, message, retryable }`.
 
@@ -64,6 +70,7 @@ Input/output JSON Schemas: `schemas/tools.json` (+ `schemas/defs.json`), validat
 | `get_findings` | `scanId`; optional `cursor` (<=256, `[A-Za-z0-9_-]+`), `limit` (1-200, default 50), `includeEvidence` (default true), `filter{minSeverity,scanners,ruleIds,cwe,pathPrefix}` | `scanId`, `state`, `complete`, `total`, `findings`, `nextCursor`, `untrusted` |
 | `generate_report` | `scanId`; optional `formats` (`md`,`json`,`sarif`; default `md`,`json`), `outputDir`, `allowWriteInsideTarget` (false), `allowPartial` (false), `includeEvidence` (true) | `scanId`, `outputDir`, `files[{format,path,bytes,sha256}]`, `summary`, `partial` |
 | `list_scanners` | none | `serverVersion`, `rulesetHash`, `scanners[{id,version,ruleCount,enabledByDefault,...}]`, `advisoryDb`, `networkAllowed`, `limits` |
+| `update_advisory_db` | optional `action` (`start` default, `status`), `ecosystems` (subset of `npm`,`PyPI`,`crates.io`,`Go`,`Maven`; default all), `includeMalware` (default true) | `state` (`idle`,`running`,`completed`,`failed`), `started`, `options`, `progress{phase,ecosystem,ecosystemsDone,ecosystemsTotal}`, `startedAt`, `finishedAt`, `result{generatedAt,advisories,shards,unparsable}`, `error`. Async: poll with `action: "status"`. |
 
 Default limits (min..max): maxFiles 50000 (1..500000), maxFileBytes 1 MiB (1 KiB..8 MiB), maxTotalBytes 512 MiB (1 MiB..4 GiB), maxFindings 5000 (1..50000), timeoutMs 120000 (1000..900000). Scanner concurrency: 2 running, 8 queued, last 20 jobs kept.
 
@@ -77,14 +84,34 @@ Default limits (min..max): maxFiles 50000 (1..500000), maxFileBytes 1 MiB (1 KiB
 |---|---|
 | `SAST_AUDIT_MCP_ALLOWED_ROOTS` | Allowed scan roots; `repoPath` must resolve inside one of them |
 | `SAST_AUDIT_MCP_OUTPUT_ROOT` | Root for report output directories |
-| `SAST_AUDIT_MCP_ALLOW_NETWORK` | Enables online OSV lookups (`online: true` otherwise fails with `E_NETWORK_DISABLED`) |
+| `SAST_AUDIT_MCP_ALLOW_NETWORK` | Enables online OSV lookups and `update_advisory_db` (otherwise `E_NETWORK_DISABLED`) |
 | `SAST_AUDIT_MCP_FIXED_TIME` | Fixed clock for reproducible reports |
-| `SAST_AUDIT_MCP_ADVISORY_DB` | Path to the offline advisory DB |
+| `SAST_AUDIT_MCP_ADVISORY_DB` | Path to the offline advisory DB (also the target of `update_advisory_db`) |
 | `SAST_AUDIT_MCP_DB_STALE_DAYS` | Advisory DB age (days) after which `W_ADVISORY_DB_STALE` is raised (default 30, 1..3650) |
 
 ## Offline advisory DB
 
 Dependency scanning (lockfiles: package-lock, yarn, pnpm, poetry, Cargo, requirements.txt, go.sum, pom.xml, ...) matches against a local sharded advisory DB (manifest plus shards verified by `contentSha256`; invalid shards are ignored with `W_ADVISORY_DB_INVALID_SHARD`; missing/invalid manifest raises `E_ADVISORY_DB_MISSING` / `E_ADVISORY_DB_INVALID`). Network is off by default; fixtures live in `test/fixtures`.
+
+Build or refresh the DB from the [OSV](https://osv.dev) bulk dumps (re-run within `SAST_AUDIT_MCP_DB_STALE_DAYS` to avoid `W_ADVISORY_DB_STALE`):
+
+- **From the MCP client:** call `update_advisory_db` (needs `SAST_AUDIT_MCP_ALLOW_NETWORK=1` and `SAST_AUDIT_MCP_ADVISORY_DB`), then poll `update_advisory_db {"action":"status"}` until `completed` (a full build takes several minutes; npm is ~220 MB). Dumps are processed in memory, nothing but the shards is written to disk. The DB is rebuilt in `<db>.tmp-*` and swapped in only on success, so a failed update keeps the previous DB. The target must be absent, empty, or an existing DB (`manifest.json` with `schemaVersion: 1`); anything else is refused with `E_OUTPUT_DIR_UNSAFE`. `ecosystems` defines the whole new DB (ecosystems not listed are dropped). One update runs at a time per server.
+- **From the shell:**
+
+```sh
+for e in npm PyPI Go Maven crates.io; do
+  mkdir -p osv-src/$e
+  curl -sSfL -o $e.zip "https://osv-vulnerabilities.storage.googleapis.com/$e/all.zip"
+  unzip -q -o $e.zip -d osv-src/$e
+done
+node scripts/build-advisory-db.mjs /path/to/advisory-db osv-src/*
+```
+
+**Antivirus quarantine.** OSV `MAL-*` records (and some GHSA records) embed snippets of real malware, so Microsoft Defender and similar tools may quarantine files in `osv-src/` or in the DB (e.g. `Trojan:NPM/Stealer`, `Trojan:PyPI/ShaiWorm`). These are inert JSON data, but:
+
+- Delete `osv-src/` after a shell build instead of excluding it; it is not needed at runtime (`update_advisory_db` never creates it).
+- A quarantined shard in the DB is indistinguishable from "no advisories" (a missing shard is not an error), so detections for that package are silently lost. Check your AV history after builds and full scans.
+- If shards get quarantined, either add an AV exclusion scoped to the DB directory only, or rebuild without malware records (`update_advisory_db {"includeMalware": false}`, or drop `MAL-*` files from `osv-src/` before running the script) at the cost of losing malicious-package detection.
 
 ## Reports
 
@@ -93,7 +120,7 @@ Dependency scanning (lockfiles: package-lock, yarn, pnpm, poetry, Cargo, require
 ## Security guarantees
 
 - Read-only on the target repo; symlinks skipped by default; path traversal and out-of-root paths rejected.
-- Static rules run on RE2 (linear time) with a per-file time budget; no `child_process`, `vm`, `eval` or dynamic `import()` (enforced by ESLint); fs writes only in `src/report/writer.ts`; network only in `src/net/osvClient.ts`.
+- Static rules run on RE2 (linear time) with a per-file time budget; no `child_process`, `vm`, `eval` or dynamic `import()` (enforced by ESLint); fs writes only in `src/report/writer.ts` and `src/advisory/update.ts` (advisory DB directory only); network only in `src/net/osvClient.ts`.
 - Secrets are redacted in findings, reports and logs (`assertNoSecrets`); evidence is sanitized (HTML/control/bidi escaped, <=200 chars).
 - Finding text is untrusted data (`untrusted: true`), never instructions.
 ## Error handling

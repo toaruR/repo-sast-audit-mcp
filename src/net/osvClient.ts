@@ -31,6 +31,19 @@ function realTransport(): OsvTransport {
   };
 }
 
+const OSV_DUMP_URL = "https://osv-vulnerabilities.storage.googleapis.com";
+
+export type DumpTransport = (url: string) => Promise<Buffer>;
+
+/** Bulk dump (all.zip) of one ecosystem; the request carries only the ecosystem name. */
+export async function downloadOsvDump(ecosystem: string, transport?: DumpTransport): Promise<Buffer> {
+  const url = `${OSV_DUMP_URL}/${encodeURIComponent(ecosystem)}/all.zip`;
+  if (transport) return transport(url);
+  const res = await fetch(url);
+  if (!res.ok) throw new OsvError("E_INTERNAL", `OSV dump HTTP ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
 export function buildRequestBody(pkg: OsvPackage): string {
   return JSON.stringify({ ecosystem: pkg.ecosystem, name: pkg.name, version: pkg.version });
 }
