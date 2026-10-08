@@ -140,11 +140,16 @@ export function computeRequestKey(repoRealPath: string, req: ScanRequest): strin
   return createHash("sha256").update(JSON.stringify(payload), "utf8").digest("hex");
 }
 
+// Run from src/ (tsx) or dist/src/ (tsc output). tsx is resolved from this package, not from the cwd.
+const RUNNING_TS = import.meta.url.endsWith(".ts");
+const WORKER_URL = new URL(RUNNING_TS ? "./worker.ts" : "./worker.js", import.meta.url);
+const WORKER_EXEC_ARGV = RUNNING_TS ? ["--import", import.meta.resolve("tsx")] : [];
+
 function workerLauncher(repoPath: string, spec?: RunSpec, onProgress?: (p: WorkerProgress) => void, signal?: AbortSignal): Promise<LaunchResult> {
   return new Promise<LaunchResult>((resolve, reject) => {
     const abortFlag = new SharedArrayBuffer(4);
-    const worker = new Worker(new URL("./worker.ts", import.meta.url), {
-      execArgv: ["--import", "tsx"],
+    const worker = new Worker(WORKER_URL, {
+      execArgv: WORKER_EXEC_ARGV,
       workerData: { ...(spec ?? { scanners: ALL_SCANNERS, options: DEFAULT_OPTIONS }), repoPath, abortFlag },
     });
     // Abort: raise the shared flag (the worker polls it); a worker that does not drain is terminated.

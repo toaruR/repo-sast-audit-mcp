@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
+import { assetPath } from "./assets.js";
 import { LIMITS } from "./constants.js";
 
 // Tool contracts (design 3). Schemas live in schemas/defs.json ($id "d") and schemas/tools.json.
@@ -18,7 +19,7 @@ export interface ToolValidators {
 }
 
 function readJson(name: string): unknown {
-  return JSON.parse(readFileSync(new URL(`../schemas/${name}`, import.meta.url), "utf8"));
+  return JSON.parse(readFileSync(assetPath("schemas", name), "utf8"));
 }
 
 export function createAjv(): Ajv {

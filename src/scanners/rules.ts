@@ -1,8 +1,7 @@
 import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { RE2 } from "re2-wasm";
 import { z } from "zod";
+import { assetPath } from "../assets.js";
 import { RULEID_MAX } from "../constants.js";
 import { McpError } from "../errors.js";
 
@@ -85,7 +84,7 @@ export function parseRules(input: unknown): CompiledRule[] {
   return out;
 }
 
-export const DEFAULT_RULES_FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "rules", "rules.json");
+export const DEFAULT_RULES_FILE = assetPath("rules", "rules.json");
 
 /** Loads and self-tests the rule file. Any failure is E_RULE_INVALID (startup exit 2). */
 export function loadRules(file: string = DEFAULT_RULES_FILE): CompiledRule[] {

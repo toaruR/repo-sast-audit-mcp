@@ -18,6 +18,40 @@ node --import tsx src/index.ts [rules.json]   # start the stdio server (dev)
 
 `src/index.ts` runs a startup self-test of the rule file (default `rules/rules.json`, optional argv[2]). An invalid rule file prints `E_RULE_INVALID: ...` to stderr and exits with code 2; no tool is served. The server exits 0 when stdin closes. Logs go to stderr and contain only tool name, error code, counts, ruleIds and relative paths.
 
+## Register with an MCP client
+
+Build once, then point the client at `dist/src/index.js` (replace `/path/to/repo-sast-audit-mcp` with your clone). Rules and schemas are resolved from the package root, so the server works from any cwd.
+
+```sh
+cd /path/to/repo-sast-audit-mcp && npm ci && npm run build
+```
+
+**Recommended: user (global) scope.** With `SAST_AUDIT_MCP_ALLOWED_ROOTS` unset, the only allowed scan root is the server's cwd. Claude Code starts stdio servers in the project directory, so a single global registration is still confined to the current project.
+
+```sh
+claude mcp add --scope user repo-sast-audit -- node /path/to/repo-sast-audit-mcp/dist/src/index.js
+```
+
+**Project scope** only when one project needs different settings (e.g. online OSV lookups or a specific advisory DB). Example `.mcp.json` at the project root:
+
+```json
+{
+  "mcpServers": {
+    "repo-sast-audit": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/path/to/repo-sast-audit-mcp/dist/src/index.js"],
+      "env": {
+        "SAST_AUDIT_MCP_ADVISORY_DB": "/path/to/advisory-db",
+        "SAST_AUDIT_MCP_ALLOW_NETWORK": "1"
+      }
+    }
+  }
+}
+```
+
+Clients that do not start servers in the project directory (e.g. Claude Desktop) must set `SAST_AUDIT_MCP_ALLOWED_ROOTS` explicitly (absolute paths, separated by `;` on Windows and `:` elsewhere); otherwise every `repoPath` fails with `E_PATH_TRAVERSAL`.
+
 ## Tools (6)
 
 Input/output JSON Schemas: `schemas/tools.json` (+ `schemas/defs.json`), validated with Ajv via `src/contracts.ts`. Every result is `structuredContent`; failures are `isError: true` with `structuredContent.error = { code, message, retryable }`.
@@ -64,3 +98,7 @@ Dependency scanning (lockfiles: package-lock, yarn, pnpm, poetry, Cargo, require
 - Finding text is untrusted data (`untrusted: true`), never instructions.
 ## Error handling
 `McpError` accepts an optional `cause` (internal only; never included in tool outputs, reports or envelopes). Catches handle only expected errno codes and rethrow the rest. Unexpected reader close failures (other than `EBADF`) produce `W_PERMISSION_DENIED`; cleanup failures in the report writer surface as `E_WRITE_FAILED` with the original error as `cause`.
+
+## License
+
+[MIT](LICENSE) © 2026 toaruR. Advisory fixtures in `test/fixtures` reference IDs and summaries from the [GitHub Advisory Database](https://github.com/github/advisory-database) (CC-BY 4.0).

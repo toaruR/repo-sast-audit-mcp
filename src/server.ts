@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { assetPath } from "./assets.js";
 import { TOOL_NAMES, type ToolName } from "./contracts.js";
 import { McpError } from "./errors.js";
 import { makeErrorEnvelope } from "./envelope.js";
@@ -36,7 +37,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
 };
 
 function readSchemas(name: string): Record<string, unknown> {
-  return JSON.parse(readFileSync(new URL(`../schemas/${name}`, import.meta.url), "utf8")) as Record<string, unknown>;
+  return JSON.parse(readFileSync(assetPath("schemas", name), "utf8")) as Record<string, unknown>;
 }
 
 /** Inlines {"$ref":"d#/X"} so MCP clients see self-contained input schemas. */
