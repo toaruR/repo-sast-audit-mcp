@@ -77,7 +77,7 @@ test("T-05 (F-08a) force: identical request with force=true => E_LIMIT_EXCEEDED"
   assert.strictEqual(ctl.launched, 2);
 });
 
-test("T-11 (F-14) network flag: online=true without VULN_MCP_ALLOW_NETWORK => E_NETWORK_DISABLED", async () => {
+test("T-11 (F-14) network flag: online=true without SAST_AUDIT_MCP_ALLOW_NETWORK => E_NETWORK_DISABLED", async () => {
   const saved = process.env[ENV.ALLOW_NETWORK];
   delete process.env[ENV.ALLOW_NETWORK];
   const orig = globalThis.fetch;

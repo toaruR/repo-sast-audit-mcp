@@ -119,7 +119,7 @@ export interface OutputDirOptions extends FsPathOptions {
   scanId: string;
   outputDir?: string;
   allowWriteInsideTarget?: boolean;
-  /** Overrides VULN_MCP_OUTPUT_ROOT / os.tmpdir()/repo-vuln-report. */
+  /** Overrides SAST_AUDIT_MCP_OUTPUT_ROOT / os.tmpdir()/repo-sast-audit. */
   outputRoot?: string;
 }
 
@@ -129,11 +129,11 @@ export interface OutputDirOptions extends FsPathOptions {
  */
 export function validateOutputDir(repoReal: string, opts: OutputDirOptions): string {
   const outputRoot =
-    opts.outputRoot ?? readEnv(ENV.OUTPUT_ROOT) ?? path.join(os.tmpdir(), "repo-vuln-report");
+    opts.outputRoot ?? readEnv(ENV.OUTPUT_ROOT) ?? path.join(os.tmpdir(), "repo-sast-audit");
   const allow = opts.allowWriteInsideTarget === true;
   let candidate: string;
   if (opts.outputDir === undefined) {
-    candidate = allow ? path.join(repoReal, ".vuln-report") : path.join(outputRoot, opts.scanId);
+    candidate = allow ? path.join(repoReal, ".sast-audit") : path.join(outputRoot, opts.scanId);
   } else {
     const o = opts.outputDir;
     if (typeof o !== "string" || o.length === 0) throw new McpError("E_INVALID_INPUT", "outputDir must be a non-empty string");

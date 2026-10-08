@@ -39,8 +39,8 @@ test("depth beyond MAX_DEPTH (64) stops descent and emits a warning", () => {
   assert.strictEqual(w.count("W_MAX_DEPTH"), 1);
 });
 
-test(".git, node_modules and .vuln-report directories are skipped", () => {
-  const root = mk([".git/config", "node_modules/p/i.js", ".vuln-report/r.json", "src/a.js", "sub/node_modules/q.js"]);
+test(".git, node_modules and .sast-audit directories are skipped", () => {
+  const root = mk([".git/config", "node_modules/p/i.js", ".sast-audit/r.json", "src/a.js", "sub/node_modules/q.js"]);
   assert.deepStrictEqual(run(root).rels, ["src/a.js"]);
 });
 

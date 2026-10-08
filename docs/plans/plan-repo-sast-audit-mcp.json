@@ -5,10 +5,10 @@
     {
       "id": "T001",
       "title": "Toolchain install, scaffold and constants module",
-      "intent": "Make the toolchain real first (highest external uncertainty). Create ESM TS5 package repo-vuln-report-mcp (type module, engines.node \">=20.11 <23\"), exactly the 9 runtime deps of 2.1 with their major pins, devDependencies typescript/tsx/eslint/typescript-eslint/@types/node, generated package-lock.json (run npm install once, then npm ci must pass), strict tsconfig, ESLint ban rules (child_process, node:vm, eval, dynamic import(); fs writes only in src/report/writer.ts; network only in src/net/osvClient.ts), and src/constants.ts exporting every 2.2 row by name (LIMITS = {maxFiles,maxFileBytes,maxTotalBytes,maxFindings,timeoutMs,waitMs} each {default,min,max}; all scalar names; ENV names; DEFAULT_OPTIONS). process.env is read only in constants.ts. DEP_MAX is declared literally as `export const DEP_MAX = 9`; tsconfig.json is plain JSON without comments (so node can parse it). Ban rules are ESLint no-restricted-imports / no-restricted-syntax (ImportExpression, CallExpression[callee.name=eval|require], child_process and node:vm imports) whose messages start with \"BANNED:\", so a verify probe can prove each fires. Dynamic import() and require() are also forbidden by the textual grep below (cheap belt) in addition to the ESLint AST rule (proof by probe). Rollback/partial: after this task the tree has package.json, package-lock.json, tsconfig.json, eslint.config.js and src/constants.ts (nothing imports them yet); every test, scanner, job, tool and server file do not exist yet, so nothing is half-wired; the state is green when `npm ci` and `npx tsc --noEmit` (non-empty src) exit 0. Revert (after its dependents) = undo package.json, package-lock.json, tsconfig.json, eslint.config.js, src/constants.ts.",
+      "intent": "Make the toolchain real first (highest external uncertainty). Create ESM TS5 package repo-sast-audit-mcp (type module, engines.node \">=20.11 <23\"), exactly the 9 runtime deps of 2.1 with their major pins, devDependencies typescript/tsx/eslint/typescript-eslint/@types/node, generated package-lock.json (run npm install once, then npm ci must pass), strict tsconfig, ESLint ban rules (child_process, node:vm, eval, dynamic import(); fs writes only in src/report/writer.ts; network only in src/net/osvClient.ts), and src/constants.ts exporting every 2.2 row by name (LIMITS = {maxFiles,maxFileBytes,maxTotalBytes,maxFindings,timeoutMs,waitMs} each {default,min,max}; all scalar names; ENV names; DEFAULT_OPTIONS). process.env is read only in constants.ts. DEP_MAX is declared literally as `export const DEP_MAX = 9`; tsconfig.json is plain JSON without comments (so node can parse it). Ban rules are ESLint no-restricted-imports / no-restricted-syntax (ImportExpression, CallExpression[callee.name=eval|require], child_process and node:vm imports) whose messages start with \"BANNED:\", so a verify probe can prove each fires. Dynamic import() and require() are also forbidden by the textual grep below (cheap belt) in addition to the ESLint AST rule (proof by probe). Rollback/partial: after this task the tree has package.json, package-lock.json, tsconfig.json, eslint.config.js and src/constants.ts (nothing imports them yet); every test, scanner, job, tool and server file do not exist yet, so nothing is half-wired; the state is green when `npm ci` and `npx tsc --noEmit` (non-empty src) exit 0. Revert (after its dependents) = undo package.json, package-lock.json, tsconfig.json, eslint.config.js, src/constants.ts.",
       "depends_on": [],
       "design_refs": [
-        "Design: repo-vuln-report-mcp (read-only repo vulnerability scan + report MCP server)",
+        "Design: repo-sast-audit-mcp (read-only repo vulnerability scan + report MCP server)",
         "2. Stack and constants",
         "2.1 Stack",
         "2.2 Constants (options, limits, env)"
@@ -307,9 +307,9 @@
       "acceptance": [
         "test/osv-client.test.ts, test \"request body JSON keys equal exactly\": request body JSON keys equal exactly [\"ecosystem\",\"name\",\"version\"]",
         "test/osv-client.test.ts, test \"extra input fields (for example path, line)\": extra input fields (for example path, line) never appear in the request body (spy test)",
-        "test/osv-client.test.ts, test \"network disabled by default\": with VULN_MCP_ALLOW_NETWORK unset, await client.query([{ecosystem:\"npm\",name:\"lodash\",version:\"4.17.20\"}]) rejects with error.code === \"E_NETWORK_DISABLED\"",
-        "test/osv-client.test.ts, test \"no transport call when disabled\": with VULN_MCP_ALLOW_NETWORK unset, after constructing the client and one rejected query() the fake transport call count === 0 (0 network calls)",
-        "test/osv-client.test.ts, test \"one call per package when enabled\": with VULN_MCP_ALLOW_NETWORK=1 and N distinct packages queried, the fake transport call count === N (exactly once per package)",
+        "test/osv-client.test.ts, test \"network disabled by default\": with SAST_AUDIT_MCP_ALLOW_NETWORK unset, await client.query([{ecosystem:\"npm\",name:\"lodash\",version:\"4.17.20\"}]) rejects with error.code === \"E_NETWORK_DISABLED\"",
+        "test/osv-client.test.ts, test \"no transport call when disabled\": with SAST_AUDIT_MCP_ALLOW_NETWORK unset, after constructing the client and one rejected query() the fake transport call count === 0 (0 network calls)",
+        "test/osv-client.test.ts, test \"one call per package when enabled\": with SAST_AUDIT_MCP_ALLOW_NETWORK=1 and N distinct packages queried, the fake transport call count === N (exactly once per package)",
         "verify[4] net-confinement grep over src (excluding src/net) has expect_exit_code 1 (grep status 1 = no match; status 2 fails), and verify[5] proves on a temp tree that the same pattern exits 0 on https/fetch/net/WebSocket/undici snippets, 1 on clean code, and ignores a violating file placed under a net directory"
       ],
       "verify": [
@@ -466,7 +466,7 @@
         }
       ],
       "acceptance": [
-        "test/constants-env.test.ts, test \"env names\": assert.deepStrictEqual(Object.values(ENV).sort(), the six names VULN_MCP_ALLOWED_ROOTS, VULN_MCP_OUTPUT_ROOT, VULN_MCP_ALLOW_NETWORK, VULN_MCP_FIXED_TIME, VULN_MCP_DB_STALE_DAYS, VULN_MCP_ADVISORY_DB sorted)",
+        "test/constants-env.test.ts, test \"env names\": assert.deepStrictEqual(Object.values(ENV).sort(), the six names SAST_AUDIT_MCP_ALLOWED_ROOTS, SAST_AUDIT_MCP_OUTPUT_ROOT, SAST_AUDIT_MCP_ALLOW_NETWORK, SAST_AUDIT_MCP_FIXED_TIME, SAST_AUDIT_MCP_DB_STALE_DAYS, SAST_AUDIT_MCP_ADVISORY_DB sorted)",
         "test/constants-env.test.ts, test \"option defaults\": assert.deepStrictEqual(DEFAULT_OPTIONS, {strictLimits:false,online:false,symlinkPolicy:\"skip\",respectGitignore:true,includeGlobs:[],excludeGlobs:[]})",
         "test/constants-env.test.ts, test \"tool defaults\": assert.deepStrictEqual(TOOL_DEFAULTS, {force:false,getFindings:{limit:50,includeEvidence:true},generateReport:{formats:[\"md\",\"json\"],allowWriteInsideTarget:false,allowPartial:false,includeEvidence:true}}) (TOOL_DEFAULTS is exported from src/constants.ts)",
         "test/constants-env.test.ts, test \"env hygiene\": the test walks src recursively with fs.readdirSync and asserts the list of files whose text contains \"process.env\" deep-equals [\"src/constants.ts\"] (containing constants.ts proves the walk is not empty)",
@@ -524,7 +524,7 @@
         }
       ],
       "acceptance": [
-        "verify[2] `node test/fixtures/n.cjs docs/design-repo-vuln-report-mcp.md` exits 0 and prints the 7-line stdout block of section 8 verbatim; test \"T-02 section 8 script\" in test/scoring.test.ts compares the script stdout line by line with that block",
+        "verify[2] `node test/fixtures/n.cjs docs/design-repo-sast-audit-mcp.md` exits 0 and prints the 7-line stdout block of section 8 verbatim; test \"T-02 section 8 script\" in test/scoring.test.ts compares the script stdout line by line with that block",
         "test/scoring.test.ts, test \"T-02 rounding boundaries\": riskScore of a finding list whose raw10 sum is 94 equals 9 and with raw10 95 equals 10",
         "test/scoring.test.ts, test \"T-02 rounding boundaries 59/60\": riskScore with raw10 594 equals 59 and with raw10 595 equals 60",
         "test/scoring.test.ts, test \"T-02 low floor\": a low/low finding (raw10 4) gives riskScore 1 (not 0) and by_score rating low",
@@ -541,7 +541,7 @@
           "expect_exit_code": 0
         },
         {
-          "command": "node test/fixtures/n.cjs docs/design-repo-vuln-report-mcp.md",
+          "command": "node test/fixtures/n.cjs docs/design-repo-sast-audit-mcp.md",
           "expect_exit_code": 0
         }
       ],
@@ -820,7 +820,7 @@
         "test/path-strings.test.ts, test \"./repo (relative)\": T-10 (F-16): ./repo (relative) => E_INVALID_INPUT",
         "test/path-strings.test.ts, test \"a path containing a NUL char\": T-10 (F-16): a path containing a NUL char => E_INVALID_INPUT",
         "test/path-strings.test.ts, test \"reserved segments CON and COM1 in any path\": T-10 (F-16): reserved segments CON and COM1 in any path segment (also <root>/con/x) => E_INVALID_INPUT",
-        "test/path-strings.test.ts, test \"path outside VULN_MCP_ALLOWED_ROOTS\": path outside VULN_MCP_ALLOWED_ROOTS => E_PATH_TRAVERSAL",
+        "test/path-strings.test.ts, test \"path outside SAST_AUDIT_MCP_ALLOWED_ROOTS\": path outside SAST_AUDIT_MCP_ALLOWED_ROOTS => E_PATH_TRAVERSAL",
         "test/path-strings.test.ts, test \"path of PATH_MAX+1 (4097) chars\": path of PATH_MAX+1 (4097) chars => E_INVALID_INPUT"
       ],
       "verify": [
@@ -941,8 +941,8 @@
         }
       ],
       "acceptance": [
-        "test/output-dir-resolve.test.ts, test \"no outputDir resolves to\": no outputDir resolves to VULN_MCP_OUTPUT_ROOT/<scanId>",
-        "test/output-dir-resolve.test.ts, test \"allowWriteInsideTarget=true without outputDir\": allowWriteInsideTarget=true without outputDir resolves to <repo>/.vuln-report/",
+        "test/output-dir-resolve.test.ts, test \"no outputDir resolves to\": no outputDir resolves to SAST_AUDIT_MCP_OUTPUT_ROOT/<scanId>",
+        "test/output-dir-resolve.test.ts, test \"allowWriteInsideTarget=true without outputDir\": allowWriteInsideTarget=true without outputDir resolves to <repo>/.sast-audit/",
         "test/output-dir-resolve.test.ts, test \"explicit outputDir inside the target is\": explicit outputDir inside the target is accepted when allowWriteInsideTarget=true",
         "test/output-dir-resolve.test.ts, test \"outputDir outside the allowed roots\": outputDir outside the allowed roots => E_PATH_TRAVERSAL",
         "test/output-dir-resolve.test.ts, test \"unreadable outputDir\": T-23 (F-07b): unreadable outputDir => E_PERMISSION_DENIED before any write"
@@ -1117,7 +1117,7 @@
       "acceptance": [
         "test/walker.test.ts, test \"traversal order equals code-point order of paths\": traversal order equals code-point order of paths",
         "test/walker.test.ts, test \"depth beyond MAX_DEPTH (64) stops descent and\": depth beyond MAX_DEPTH (64) stops descent and emits a warning",
-        "test/walker.test.ts, test \".git, node_modules and .vuln-report directories\": .git, node_modules and .vuln-report directories are skipped",
+        "test/walker.test.ts, test \".git, node_modules and .sast-audit directories\": .git, node_modules and .sast-audit directories are skipped",
         "test/walker.test.ts, test \"node_modules is walked when an includeGlobs\": node_modules is walked when an includeGlobs entry matches it",
         "test/walker.test.ts, test \".gitignore matches are skipped when\": .gitignore matches are skipped when respectGitignore=true and walked when false",
         "test/walker.test.ts, test \"aborting the signal stops the walk before the\": aborting the signal stops the walk before the next file"
@@ -1967,7 +1967,7 @@
       "acceptance": [
         "test/jobs-submit.test.ts, test \"T-05 reuse\": with 2 running + 8 queued jobs, an identical request returns reused:true; test \"T-05 queue full\": with the same 2 running + 8 queued jobs, a new (different) request => E_LIMIT_EXCEEDED",
         "test/jobs-submit.test.ts, test \"T-05 (F-08a) force\": with 2 running + 8 queued jobs, an identical request with force=true => E_LIMIT_EXCEEDED (reuse check precedes capacity; nothing is queued)",
-        "test/jobs-submit.test.ts, test \"T-11 (F-14) network flag\": scan_repository with options.online=true while VULN_MCP_ALLOW_NETWORK is unset => E_NETWORK_DISABLED, fake transport call count 0",
+        "test/jobs-submit.test.ts, test \"T-11 (F-14) network flag\": scan_repository with options.online=true while SAST_AUDIT_MCP_ALLOW_NETWORK is unset => E_NETWORK_DISABLED, fake transport call count 0",
         "test/jobs-submit.test.ts, test \"terminal jobs are never reused (same request\": terminal jobs are never reused (same request gets a new scanId)",
         "test/jobs-submit.test.ts, test \"identical inputs give identical 64-hex\": identical inputs give identical 64-hex requestKey and scanId S-<requestKey[0:12]>-<counter>",
         "test/skeleton-e2e.test.ts is not modified by this task and all its tests, including the skeleton-stub: ones that read job.stubResult, still pass (verify[2] runs that file)"
@@ -2553,7 +2553,7 @@
         "test/list-scanners.test.ts, test \"output validates against the 3.6 schema\": output validates against the 3.6 schema",
         "test/list-scanners.test.ts, test \"list_scanners: non-empty input\": tools/call list_scanners with arguments {\"x\":1} returns isError true, structuredContent.error.code \"E_INVALID_INPUT\" and structuredContent.error.retryable false (the same call with {} succeeds)",
         "test/list-scanners.test.ts, test \"scanners array has 4 entries dependency,\": scanners array has 4 entries dependency, secret, static, config",
-        "test/list-scanners.test.ts, test \"networkAllowed is false when\": networkAllowed is false when VULN_MCP_ALLOW_NETWORK is unset",
+        "test/list-scanners.test.ts, test \"networkAllowed is false when\": networkAllowed is false when SAST_AUDIT_MCP_ALLOW_NETWORK is unset",
         "test/list-scanners.test.ts, test \"advisoryDb.present is false when no DB exists\": advisoryDb.present is false when no DB exists",
         "test/list-scanners.test.ts, test \"advisoryDb.stale is true when DB age is\": advisoryDb.stale is true when DB age is STALE_DAYS+1"
       ],
@@ -2822,7 +2822,7 @@
     {
       "id": "T064",
       "title": "Final traceability gate (T-14) and full-suite run",
-      "intent": "Add test/traceability.test.ts, test/fixtures/section11-map.json and test/fixtures/check-ids.cjs (CLI `node check-ids.cjs <design.md> <testsDir>`: reads the first cells of the section 9 table (31 F-ids incl. suffixed) and section 10 table (35 T-ids incl. T-10b), collects test()/it()/describe() titles of <testsDir>/*.test.ts, prints one line `MISSING: <id>` per missing id on stdout and exit 1, or prints `OK: 66 ids found` on stdout and exit 0; on missing arguments or unreadable input prints `ERROR: <reason>` on stderr and exit 2; its behaviour is pre-validated by a self-test in test/traceability.test.ts against temp fixture directories), then run the entire suite. Judgment method: the traceability test reads docs/design-repo-vuln-report-mcp.md and the test/*.test.ts sources with fs and decides pass/fail itself as listed in the acceptance items (E_* codes from ERROR_CODES in src/errors.ts, W_* tokens from design sections 4 and 9, T-04..T-34 in test titles, the goals map, and the section 11 table rows against section11-map.json). Rollback/partial: after this task the tree has the complete project and no gaps remain; the state is green when the full-suite command exits 0. Revert (after its dependents) = undo test/traceability.test.ts, test/fixtures/section11-map.json, test/fixtures/check-ids.cjs.",
+      "intent": "Add test/traceability.test.ts, test/fixtures/section11-map.json and test/fixtures/check-ids.cjs (CLI `node check-ids.cjs <design.md> <testsDir>`: reads the first cells of the section 9 table (31 F-ids incl. suffixed) and section 10 table (35 T-ids incl. T-10b), collects test()/it()/describe() titles of <testsDir>/*.test.ts, prints one line `MISSING: <id>` per missing id on stdout and exit 1, or prints `OK: 66 ids found` on stdout and exit 0; on missing arguments or unreadable input prints `ERROR: <reason>` on stderr and exit 2; its behaviour is pre-validated by a self-test in test/traceability.test.ts against temp fixture directories), then run the entire suite. Judgment method: the traceability test reads docs/design-repo-sast-audit-mcp.md and the test/*.test.ts sources with fs and decides pass/fail itself as listed in the acceptance items (E_* codes from ERROR_CODES in src/errors.ts, W_* tokens from design sections 4 and 9, T-04..T-34 in test titles, the goals map, and the section 11 table rows against section11-map.json). Rollback/partial: after this task the tree has the complete project and no gaps remain; the state is green when the full-suite command exits 0. Revert (after its dependents) = undo test/traceability.test.ts, test/fixtures/section11-map.json, test/fixtures/check-ids.cjs.",
       "depends_on": [
         "T063"
       ],
@@ -2852,7 +2852,7 @@
         "test/traceability.test.ts, test \"goals map\": assert.deepStrictEqual(GOALS, {G1:\"T-01\",G2:\"T-12\",G3:\"T-13\",G4:\"T-11\",G5:\"T-08\",G6:\"T-12\"}) and each mapped T-id is contained in some collected test()/it()/describe() title",
         "test/traceability.test.ts, test \"section 11 rows covered\": the rows are the data rows of the markdown table under the heading `## 11. Defense trade-offs` in the design file (lines starting with `|` after the header and `|---|` rows; first cell = mechanism; parsed count asserted equal to 19). test/fixtures/section11-map.json is an array of {mechanism, tests:[title substrings], residual?:string}. Passes when the set of mechanism values equals the set of first cells exactly and every entry has either a non-empty tests array whose every substring occurs in some collected title, or an empty tests array with residual a non-empty string starting `RESIDUAL:`",
         "test/traceability.test.ts, test \"check-ids.cjs self-test\": spawns `node test/fixtures/check-ids.cjs <design.md> <dir>` on the real design file. (1) temp dir holding one .test.ts with titles of all 66 ids except F-14a => exit code 1, stdout contains the line \"MISSING: F-14a\" and no other MISSING line. (2) temp dir with all 66 ids => exit code 0, stdout is exactly \"OK: 66 ids found\". (3) no arguments => exit code 2, stderr starts with \"ERROR:\"; nonexistent design path => exit 2",
-        "verify[0] (tsc --noEmit, eslint ., node --import tsx --test test/*.test.ts) exits 0; verify[5] `node test/fixtures/check-ids.cjs docs/design-repo-vuln-report-mcp.md test` exits 0 with stdout \"OK: 66 ids found\"; verify[6] runs it on an empty temp dir and has expect_exit_code 1 (stdout lists MISSING: lines)"
+        "verify[0] (tsc --noEmit, eslint ., node --import tsx --test test/*.test.ts) exits 0; verify[5] `node test/fixtures/check-ids.cjs docs/design-repo-sast-audit-mcp.md test` exits 0 with stdout \"OK: 66 ids found\"; verify[6] runs it on an empty temp dir and has expect_exit_code 1 (stdout lists MISSING: lines)"
       ],
       "verify": [
         {
@@ -2876,11 +2876,11 @@
           "expect_exit_code": 0
         },
         {
-          "command": "node test/fixtures/check-ids.cjs docs/design-repo-vuln-report-mcp.md test",
+          "command": "node test/fixtures/check-ids.cjs docs/design-repo-sast-audit-mcp.md test",
           "expect_exit_code": 0
         },
         {
-          "command": "e=$(mktemp -d); node test/fixtures/check-ids.cjs docs/design-repo-vuln-report-mcp.md \"$e\"; rc=$?; rm -rf \"$e\"; exit $rc",
+          "command": "e=$(mktemp -d); node test/fixtures/check-ids.cjs docs/design-repo-sast-audit-mcp.md \"$e\"; rc=$?; rm -rf \"$e\"; exit $rc",
           "expect_exit_code": 1
         }
       ],

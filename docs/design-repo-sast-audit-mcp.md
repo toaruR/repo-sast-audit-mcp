@@ -1,4 +1,4 @@
-# Design: repo-vuln-report-mcp (read-only repo vulnerability scan + report MCP server)
+# Design: repo-sast-audit-mcp (read-only repo vulnerability scan + report MCP server)
 
 v1.3, server 0.1.0, `schemaVersion="1.0"`. Constants live in 2.2 only, used by name (T-15);`x-limit` = 2.2 row name without `options.limits.`. `scan_repository` is async (returns within `waitMs`;poll `get_scan_status`);others sync.
 
@@ -20,7 +20,7 @@ Node.js `>=20.11 <23`, TS 5 ESM. DEP_MAX runtime deps, major pins (`@modelcontex
 |`options.strictLimits`/`online`/`symlinkPolicy`/`respectGitignore`|false/false/skip/true|bool/bool/enum/bool|partial by default;G4;escape-safe;honor ignore|
 |`options.includeGlobs`/`excludeGlobs`|[]|GLOB_N globs of GLOB_LEN chars|matcher cost|
 |GLOB_N/GLOB_LEN/PATHPREFIX_MAX|50/256/1024|n/c|matcher cost;1 KiB relative prefix|
-|`options.advisoryDbPath`|unset|absolute dir|beats env VULN_MCP_ADVISORY_DB|
+|`options.advisoryDbPath`|unset|absolute dir|beats env SAST_AUDIT_MCP_ADVISORY_DB|
 |`waitMs`/`force`|0/false|0..30000/bool|below client timeout|
 |GET_FINDINGS_MAX/CURSOR_MAX|200/256|schema max|200x1536 B < 1 MiB|
 |get_findings `limit`/`includeEvidence`|50/true|1..GET_FINDINGS_MAX/bool|one page ~75 KiB;evidence needed for triage|
@@ -31,15 +31,15 @@ Node.js `>=20.11 <23`, TS 5 ESM. DEP_MAX runtime deps, major pins (`@modelcontex
 |MAX_DEPTH/LINE_MAX/LOCKFILE_MAX_BYTES|64/5000/16777216|n/c|path limit;minified line;40,000 packages|
 |PER_FILE_BUDGET_MS/CANCEL_DRAIN_MS|2000/3000|n/c|bounds cancel latency|
 |EVIDENCE_MAX|200 chars|n/c|bounds tokens,leaks|
-|STALE_DAYS(env VULN_MCP_DB_STALE_DAYS)|30|1..3650|monthly OSV dumps|
+|STALE_DAYS(env SAST_AUDIT_MCP_DB_STALE_DAYS)|30|1..3650|monthly OSV dumps|
 |BINARY_PROBE_BYTES/SECRET_WINDOW_BYTES|8192/4096|n/c|NUL early;PEM line fits|
 |ABORT_CHECK_LINES|1000|n/c|1000x5000 B at 100 MB/s=50 ms|
 |SHARD_LRU|256|n/c|256x0.5 MiB=128 MiB|
 |SECRET_MIN_LEN/HEX_MIN_LEN|20/32|n/c|shorter rarely credential;128 bit|
 |ENT_ALNUM_MILLI/ENT_HEX_MILLI|4000/3200|n/c|alnum max 5954(log2 62);hex 4000|
 |REDACT_PREFIX/LEAK_SUBSTR|4/5|n/c|triage aid;stricter leak check|
-|VULN_MCP_ALLOWED_ROOTS/VULN_MCP_OUTPUT_ROOT|cwd only/`os.tmpdir()/repo-vuln-report`|abs dirs|least privilege|
-|VULN_MCP_ALLOW_NETWORK/VULN_MCP_FIXED_TIME|unset/unset|`1`/ISO time|G4;reproducible tests|
+|SAST_AUDIT_MCP_ALLOWED_ROOTS/SAST_AUDIT_MCP_OUTPUT_ROOT|cwd only/`os.tmpdir()/repo-sast-audit`|abs dirs|least privilege|
+|SAST_AUDIT_MCP_ALLOW_NETWORK/SAST_AUDIT_MCP_FIXED_TIME|unset/unset|`1`/ISO time|G4;reproducible tests|
 |DEP_MAX|9|n/c|supply-chain surface|
 |PEAK_RSS_MIB|400|target|160(16 MiBx10)+4+5+128=297|
 
@@ -108,7 +108,7 @@ Input `{"type":"object","additionalProperties":false}`;errors: E_INVALID_INPUT (
 ```
 
 ## 4. Pipeline and scanners
-**Walker**: DFS in code-point order, MAX_DEPTH. Skipped: `.git/`, `node_modules/` (unless in `includeGlobs`), `.vuln-report/`, `.gitignore` matches (if `respectGitignore`), `excludeGlobs`. `skip`: symlinks unfollowed, W_SYMLINK_SKIPPED. `follow-within-root`: followed inside target only, loops caught by a `dev:ino` set;outside->W_SYMLINK_ESCAPE, unread.
+**Walker**: DFS in code-point order, MAX_DEPTH. Skipped: `.git/`, `node_modules/` (unless in `includeGlobs`), `.sast-audit/`, `.gitignore` matches (if `respectGitignore`), `excludeGlobs`. `skip`: symlinks unfollowed, W_SYMLINK_SKIPPED. `follow-within-root`: followed inside target only, loops caught by a `dev:ino` set;outside->W_SYMLINK_ESCAPE, unread.
 **Reader**: size > `maxFileBytes` skipped;NUL in first BINARY_PROBE_BYTES->W_BINARY_SKIPPED;strict UTF-8 else latin1, `W_NON_UTF8`. Line > LINE_MAX = minified: static/config skip (W_MINIFIED_SKIPPED), secret scans SECRET_WINDOW_BYTES windows. After open, `fstat` `dev:ino` must equal `lstat`, else dropped, W_FILE_CHANGED. ENOENT after listing->W_FILE_VANISHED.
 
 ### 4.1 Dependency scanner
@@ -157,7 +157,7 @@ Terminals: completed, failed, cancelled, timed_out. Transitions: submit (3.2 ste
 ```json
 {"type":"object","required":["schemaVersion","meta","summary","findings","warnings"],"properties":{"schemaVersion":{"const":"1.0"},"meta":{"type":"object","required":["scanId","rulesetHash","generatedAt","state","partial"],"properties":{"scanId":{"$ref":"d#/Sid"},"rulesetHash":{"type":"string"},"generatedAt":{"type":"string"},"state":{"$ref":"d#/St"},"partial":{"type":"boolean"}}},"summary":{"$ref":"d#/Sum"},"findings":{"type":"array","items":{"$ref":"d#/Fnd"}},"warnings":{"type":"array","items":{"$ref":"d#/Wrn"}}}}
 ```
-`report.md` carries the same findings. SARIF 2.1.0 `results[]`: `ruleId`=ruleId;`level`: critical,high->error, medium->warning, low,info->note;`message.text`=message;`locations[0].physicalLocation`: `artifactLocation.uri`=path, `region.startLine`/`startColumn`=line/column;`partialFingerprints.primary`=fingerprint;`properties`{confidence,cwe,scanner}. `runs[0].tool.driver`{name,version=serverVersion,rules[] from used ruleIds}. Output: `<VULN_MCP_OUTPUT_ROOT>/<scanId>/`;`allowWriteInsideTarget=true` without outputDir: `<repo>/.vuln-report/`. Inside target without permission, ancestor of target, or under `.git/`->E_OUTPUT_DIR_UNSAFE (by realpath). Write: `wx` tmp, `fsync`, `rename`.
+`report.md` carries the same findings. SARIF 2.1.0 `results[]`: `ruleId`=ruleId;`level`: critical,high->error, medium->warning, low,info->note;`message.text`=message;`locations[0].physicalLocation`: `artifactLocation.uri`=path, `region.startLine`/`startColumn`=line/column;`partialFingerprints.primary`=fingerprint;`properties`{confidence,cwe,scanner}. `runs[0].tool.driver`{name,version=serverVersion,rules[] from used ruleIds}. Output: `<SAST_AUDIT_MCP_OUTPUT_ROOT>/<scanId>/`;`allowWriteInsideTarget=true` without outputDir: `<repo>/.sast-audit/`. Inside target without permission, ancestor of target, or under `.git/`->E_OUTPUT_DIR_UNSAFE (by realpath). Write: `wx` tmp, `fsync`, `rename`.
 Security: (1) RE2 only;ESLint bans `child_process`, `vm`, `eval`, dynamic `import()`;only `report/writer.ts` writes, only `net/osvClient.ts` uses network. (2) Logs hold ruleId, counts, relative paths;`assertNoSecrets` re-applies SEC-* patterns. (3) Repo strings are data in `untrusted`;`sanitize` escapes control/bidi chars, ANSI, `<>&`, cuts to EVIDENCE_MAX;never paths/arguments.
 
 ## 8. Worked numbers
@@ -274,7 +274,7 @@ Decision: reject=error,warn=W_*,record=accepted silently.
 |RE2 only|lookaround,backref|PCRE: ReDoS|reject E_RULE_INVALID;`negativePattern`|
 |RE2 PER_FILE_BUDGET_MS|huge legit file cut|no budget: hang|warn W_RULE_TIMEBUDGET;rest of file unscanned(limit)|
 |assertNoSecrets|text sharing LEAK_SUBSTR chars blanked|raw evidence: leak risk|record;location kept|
-|Allowed roots,reserved names|repo outside cwd;dir `con`|any path: traversal;per-OS rules: untestable|reject;VULN_MCP_ALLOWED_ROOTS,rename|
+|Allowed roots,reserved names|repo outside cwd;dir `con`|any path: traversal;per-OS rules: untestable|reject;SAST_AUDIT_MCP_ALLOWED_ROOTS,rename|
 |`strictLimits`|cap discards usable partial|fail on cap always: no partial|warn(`truncated`);opt-in failed|
 |MAX_RUNNING/MAX_QUEUED|burst of 11 scans|unbounded queue: memory|reject E_LIMIT_EXCEEDED retryable|
 |`fstat` recheck|atomic editor save|none: TOCTOU open|warn W_FILE_CHANGED;rescan|

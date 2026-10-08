@@ -8,12 +8,12 @@ test("env names", () => {
   assert.deepStrictEqual(
     Object.values(ENV).sort(),
     [
-      "VULN_MCP_ALLOWED_ROOTS",
-      "VULN_MCP_OUTPUT_ROOT",
-      "VULN_MCP_ALLOW_NETWORK",
-      "VULN_MCP_FIXED_TIME",
-      "VULN_MCP_DB_STALE_DAYS",
-      "VULN_MCP_ADVISORY_DB",
+      "SAST_AUDIT_MCP_ALLOWED_ROOTS",
+      "SAST_AUDIT_MCP_OUTPUT_ROOT",
+      "SAST_AUDIT_MCP_ALLOW_NETWORK",
+      "SAST_AUDIT_MCP_FIXED_TIME",
+      "SAST_AUDIT_MCP_DB_STALE_DAYS",
+      "SAST_AUDIT_MCP_ADVISORY_DB",
     ].sort(),
   );
 });

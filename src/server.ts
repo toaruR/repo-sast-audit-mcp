@@ -88,7 +88,7 @@ function describe(name: string, res: ToolResult): string {
 
 export function createServer(manager: JobManager = new JobManager(), deps: ServerDeps = {}): Server {
   const server = new Server(
-    { name: "repo-vuln-report-mcp", version: deps.serverVersion ?? SERVER_VERSION },
+    { name: "repo-sast-audit-mcp", version: deps.serverVersion ?? SERVER_VERSION },
     { capabilities: { tools: {} } },
   );
   const toolDeps = {

@@ -33,7 +33,7 @@
   {
     "mechanism": "Allowed roots,reserved names",
     "tests": [
-      "path outside VULN_MCP_ALLOWED_ROOTS",
+      "path outside SAST_AUDIT_MCP_ALLOWED_ROOTS",
       "reserved segments CON and COM1"
     ]
   },
@@ -167,7 +167,7 @@
   {
     "mechanism": "Online mode egress",
     "tests": [
-      "online=true without VULN_MCP_ALLOW_NETWORK"
+      "online=true without SAST_AUDIT_MCP_ALLOW_NETWORK"
     ]
   }
 ]

@@ -22,7 +22,7 @@ export interface ReportSource {
 
 export interface ReportDeps {
   pathOptions?: FsPathOptions;
-  /** Overrides VULN_MCP_OUTPUT_ROOT. */
+  /** Overrides SAST_AUDIT_MCP_OUTPUT_ROOT. */
   outputRoot?: string;
   rulesetHash?: string;
   serverVersion?: string;

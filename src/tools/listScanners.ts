@@ -15,7 +15,7 @@ const CODED_RULES = { dependency: 1, secret: 4, config: 2, static: 0 } as const;
 
 export interface ListScannersDeps {
   serverVersion?: string;
-  /** Advisory DB directory (defaults to VULN_MCP_ADVISORY_DB). */
+  /** Advisory DB directory (defaults to SAST_AUDIT_MCP_ADVISORY_DB). */
   advisoryDbPath?: string;
   now?: number | string | Date;
   rulesFile?: string;

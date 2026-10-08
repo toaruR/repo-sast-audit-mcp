@@ -3,7 +3,7 @@ import type { Severity } from "../scoring.js";
 
 export const SARIF_VERSION = "2.1.0";
 export const SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json";
-export const SARIF_TOOL_NAME = "repo-vuln-report-mcp";
+export const SARIF_TOOL_NAME = "repo-sast-audit-mcp";
 
 export type SarifLevel = "error" | "warning" | "note";
 

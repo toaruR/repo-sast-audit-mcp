@@ -29,7 +29,7 @@ test("T-10 (F-16): reserved segments CON and COM1 in any path segment (also <roo
   assert.strictEqual(code(`${root}/a/COM1`), "E_INVALID_INPUT");
   assert.strictEqual(code(`${root}/ok/repo`), undefined);
 });
-test("path outside VULN_MCP_ALLOWED_ROOTS => E_PATH_TRAVERSAL", () => {
+test("path outside SAST_AUDIT_MCP_ALLOWED_ROOTS => E_PATH_TRAVERSAL", () => {
   assert.strictEqual(code(path.join(os.tmpdir(), "other", "repo")), "E_PATH_TRAVERSAL");
 });
 test("path of PATH_MAX+1 (4097) chars => E_INVALID_INPUT", () => {

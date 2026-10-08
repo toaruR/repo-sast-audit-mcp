@@ -53,7 +53,7 @@ export interface WalkResult {
   truncated: boolean;
 }
 
-const SKIP_DIRS = new Set([".git", "node_modules", ".vuln-report"]);
+const SKIP_DIRS = new Set([".git", "node_modules", ".sast-audit"]);
 
 /** UTF-8 byte order equals code point order. */
 function cpCompare(a: string, b: string): number {

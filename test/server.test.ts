@@ -126,8 +126,8 @@ test("logs contain only ruleId, counts and relative paths (no absolute path or e
   const [a, b] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "t", version: "0" });
   await Promise.all([server.connect(a), client.connect(b)]);
-  const prev = process.env["VULN_MCP_ALLOWED_ROOTS"];
-  process.env["VULN_MCP_ALLOWED_ROOTS"] = root;
+  const prev = process.env["SAST_AUDIT_MCP_ALLOWED_ROOTS"];
+  process.env["SAST_AUDIT_MCP_ALLOWED_ROOTS"] = root;
   try {
     const scan = await client.callTool({
       name: "scan_repository",
@@ -139,8 +139,8 @@ test("logs contain only ruleId, counts and relative paths (no absolute path or e
     const total = (f.structuredContent as { total: number }).total;
     assert.ok(total >= 1);
   } finally {
-    if (prev === undefined) delete process.env["VULN_MCP_ALLOWED_ROOTS"];
-    else process.env["VULN_MCP_ALLOWED_ROOTS"] = prev;
+    if (prev === undefined) delete process.env["SAST_AUDIT_MCP_ALLOWED_ROOTS"];
+    else process.env["SAST_AUDIT_MCP_ALLOWED_ROOTS"] = prev;
     await client.close();
   }
   const all = lines.join("\n");

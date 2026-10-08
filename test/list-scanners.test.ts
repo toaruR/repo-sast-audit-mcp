@@ -46,7 +46,7 @@ test("scanners array has 4 entries dependency, secret, static, config", () => {
   assert.ok(s.every((x) => x.ruleCount >= 1 && x.enabledByDefault));
 });
 
-test("networkAllowed is false when VULN_MCP_ALLOW_NETWORK is unset", () => {
+test("networkAllowed is false when SAST_AUDIT_MCP_ALLOW_NETWORK is unset", () => {
   assert.strictEqual(listScanners().networkAllowed, false);
   process.env[ENV.ALLOW_NETWORK] = "1";
   try {

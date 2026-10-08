@@ -15,7 +15,7 @@ function tempRepo(): string {
 }
 
 function connect(): { client: Client; transport: StdioClientTransport } {
-  const transport = new StdioClientTransport({ command: process.execPath, args: ["--import", "tsx", "src/index.ts"], env: { VULN_MCP_ALLOWED_ROOTS: realpathSync(tmpdir()) } });
+  const transport = new StdioClientTransport({ command: process.execPath, args: ["--import", "tsx", "src/index.ts"], env: { SAST_AUDIT_MCP_ALLOWED_ROOTS: realpathSync(tmpdir()) } });
   const client = new Client({ name: "t", version: "0" });
   return { client, transport };
 }

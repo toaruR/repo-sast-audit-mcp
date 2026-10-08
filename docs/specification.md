@@ -1,9 +1,9 @@
 # 仕様書
 
-本プロジェクト (repo-vuln-report-mcp) の仕様は次を参照:
+本プロジェクト (repo-sast-audit-mcp) の仕様は次を参照:
 
 - [README.md](../README.md): ツール(6種)・入出力・エラーコード・環境変数・起動方法・セキュリティ保証
-- [design-repo-vuln-report-mcp.md](design-repo-vuln-report-mcp.md): 詳細設計 (目標G1-G6, 障害モードF-xx, トレードオフ)
+- [design-repo-sast-audit-mcp.md](design-repo-sast-audit-mcp.md): 詳細設計 (目標G1-G6, 障害モードF-xx, トレードオフ)
 
 ## 概要
 

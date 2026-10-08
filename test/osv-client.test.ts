@@ -31,39 +31,39 @@ test("extra input fields (for example path, line) never appear in the request bo
 });
 
 test("network disabled by default", async () => {
-  const saved = process.env.VULN_MCP_ALLOW_NETWORK;
-  delete process.env.VULN_MCP_ALLOW_NETWORK;
+  const saved = process.env.SAST_AUDIT_MCP_ALLOW_NETWORK;
+  delete process.env.SAST_AUDIT_MCP_ALLOW_NETWORK;
   try {
     const f = fake();
     await assert.rejects(createOsvClient({ transport: f.transport }).query([lodash]), (e: { code?: string }) => e.code === "E_NETWORK_DISABLED");
   } finally {
-    if (saved !== undefined) process.env.VULN_MCP_ALLOW_NETWORK = saved;
+    if (saved !== undefined) process.env.SAST_AUDIT_MCP_ALLOW_NETWORK = saved;
   }
 });
 
 test("no transport call when disabled", async () => {
-  const saved = process.env.VULN_MCP_ALLOW_NETWORK;
-  delete process.env.VULN_MCP_ALLOW_NETWORK;
+  const saved = process.env.SAST_AUDIT_MCP_ALLOW_NETWORK;
+  delete process.env.SAST_AUDIT_MCP_ALLOW_NETWORK;
   try {
     const f = fake();
     const c = createOsvClient({ transport: f.transport });
     await assert.rejects(c.query([lodash]));
     assert.strictEqual(f.bodies.length, 0);
   } finally {
-    if (saved !== undefined) process.env.VULN_MCP_ALLOW_NETWORK = saved;
+    if (saved !== undefined) process.env.SAST_AUDIT_MCP_ALLOW_NETWORK = saved;
   }
 });
 
 test("one call per package when enabled", async () => {
-  const saved = process.env.VULN_MCP_ALLOW_NETWORK;
-  process.env.VULN_MCP_ALLOW_NETWORK = "1";
+  const saved = process.env.SAST_AUDIT_MCP_ALLOW_NETWORK;
+  process.env.SAST_AUDIT_MCP_ALLOW_NETWORK = "1";
   try {
     const f = fake();
     const pkgs = ["a", "b", "c", "d"].map((n) => ({ ecosystem: "npm", name: n, version: "1.0.0" }));
     await createOsvClient({ transport: f.transport }).query(pkgs);
     assert.strictEqual(f.bodies.length, pkgs.length);
   } finally {
-    if (saved === undefined) delete process.env.VULN_MCP_ALLOW_NETWORK;
-    else process.env.VULN_MCP_ALLOW_NETWORK = saved;
+    if (saved === undefined) delete process.env.SAST_AUDIT_MCP_ALLOW_NETWORK;
+    else process.env.SAST_AUDIT_MCP_ALLOW_NETWORK = saved;
   }
 });

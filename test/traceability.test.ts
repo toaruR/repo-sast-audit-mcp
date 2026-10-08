@@ -20,7 +20,7 @@ const nodeRequire = createRequire(import.meta.url);
 const checker = nodeRequire("./fixtures/check-ids.cjs") as CheckIds;
 
 const TEST_DIR = fileURLToPath(new URL(".", import.meta.url));
-const DESIGN = fileURLToPath(new URL("../docs/design-repo-vuln-report-mcp.md", import.meta.url));
+const DESIGN = fileURLToPath(new URL("../docs/design-repo-sast-audit-mcp.md", import.meta.url));
 const CHECK_IDS = join(TEST_DIR, "fixtures", "check-ids.cjs");
 const SELF = "traceability.test.ts";
 

@@ -21,19 +21,19 @@ const code = (o: Parameters<typeof validateOutputDir>[1]): string | undefined =>
   return undefined;
 };
 
-test("no outputDir resolves to VULN_MCP_OUTPUT_ROOT/<scanId>", () => {
-  const saved = process.env.VULN_MCP_OUTPUT_ROOT;
-  process.env.VULN_MCP_OUTPUT_ROOT = outRoot;
+test("no outputDir resolves to SAST_AUDIT_MCP_OUTPUT_ROOT/<scanId>", () => {
+  const saved = process.env.SAST_AUDIT_MCP_OUTPUT_ROOT;
+  process.env.SAST_AUDIT_MCP_OUTPUT_ROOT = outRoot;
   try {
     const r = validateOutputDir(repo, { allowedRoots: opts.allowedRoots, scanId });
     assert.strictEqual(r, path.join(outRoot, scanId));
   } finally {
-    if (saved === undefined) delete process.env.VULN_MCP_OUTPUT_ROOT;
-    else process.env.VULN_MCP_OUTPUT_ROOT = saved;
+    if (saved === undefined) delete process.env.SAST_AUDIT_MCP_OUTPUT_ROOT;
+    else process.env.SAST_AUDIT_MCP_OUTPUT_ROOT = saved;
   }
 });
-test("allowWriteInsideTarget=true without outputDir resolves to <repo>/.vuln-report/", () => {
-  assert.strictEqual(validateOutputDir(repo, { ...opts, allowWriteInsideTarget: true }), path.join(repo, ".vuln-report"));
+test("allowWriteInsideTarget=true without outputDir resolves to <repo>/.sast-audit/", () => {
+  assert.strictEqual(validateOutputDir(repo, { ...opts, allowWriteInsideTarget: true }), path.join(repo, ".sast-audit"));
 });
 test("explicit outputDir inside the target is accepted when allowWriteInsideTarget=true", () => {
   const o = path.join(repo, "reports");

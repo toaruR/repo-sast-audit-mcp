@@ -25,3 +25,5 @@ __pycache__/
 .agents/hooks.json
 docs/knowledge-kit-usage.md
 node_modules/
+dist/
+*.stackdump

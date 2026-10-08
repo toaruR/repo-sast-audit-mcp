@@ -37,7 +37,7 @@ test("T-02 critical/medium", () => {
 });
 
 test("T-02 section 8 script", () => {
-  const out = execFileSync(process.execPath, ["test/fixtures/n.cjs", "docs/design-repo-vuln-report-mcp.md"], { encoding: "utf8" });
+  const out = execFileSync(process.execPath, ["test/fixtures/n.cjs", "docs/design-repo-sast-audit-mcp.md"], { encoding: "utf8" });
   const expected = [
     "A cancelled 2000",
     "B cancelled 3000",

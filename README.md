@@ -1,6 +1,8 @@
-# repo-vuln-report-mcp
+# repo-sast-audit-mcp
 
-Read-only repository vulnerability scan and report MCP server (stdio, Node `>=20.11 <23`, ESM TypeScript). Design: [docs/design-repo-vuln-report-mcp.md](docs/design-repo-vuln-report-mcp.md).
+> **Status: prototype.** APIs, tool schemas, rule set, and environment variables may change without notice. Not intended for production use.
+
+Fast, read-only static analysis / secret / dependency audit MCP server with SARIF output (stdio, Node `>=20.11 <23`, ESM TypeScript). Design: [docs/design-repo-sast-audit-mcp.md](docs/design-repo-sast-audit-mcp.md).
 Note: `ajv` is consumed as the MCP SDK's own pinned dependency (hoisted), not declared directly.
 
 ## Run
@@ -39,12 +41,12 @@ Default limits (min..max): maxFiles 50000 (1..500000), maxFileBytes 1 MiB (1 KiB
 
 | Variable | Purpose |
 |---|---|
-| `VULN_MCP_ALLOWED_ROOTS` | Allowed scan roots; `repoPath` must resolve inside one of them |
-| `VULN_MCP_OUTPUT_ROOT` | Root for report output directories |
-| `VULN_MCP_ALLOW_NETWORK` | Enables online OSV lookups (`online: true` otherwise fails with `E_NETWORK_DISABLED`) |
-| `VULN_MCP_FIXED_TIME` | Fixed clock for reproducible reports |
-| `VULN_MCP_ADVISORY_DB` | Path to the offline advisory DB |
-| `VULN_MCP_DB_STALE_DAYS` | Advisory DB age (days) after which `W_ADVISORY_DB_STALE` is raised (default 30, 1..3650) |
+| `SAST_AUDIT_MCP_ALLOWED_ROOTS` | Allowed scan roots; `repoPath` must resolve inside one of them |
+| `SAST_AUDIT_MCP_OUTPUT_ROOT` | Root for report output directories |
+| `SAST_AUDIT_MCP_ALLOW_NETWORK` | Enables online OSV lookups (`online: true` otherwise fails with `E_NETWORK_DISABLED`) |
+| `SAST_AUDIT_MCP_FIXED_TIME` | Fixed clock for reproducible reports |
+| `SAST_AUDIT_MCP_ADVISORY_DB` | Path to the offline advisory DB |
+| `SAST_AUDIT_MCP_DB_STALE_DAYS` | Advisory DB age (days) after which `W_ADVISORY_DB_STALE` is raised (default 30, 1..3650) |
 
 ## Offline advisory DB
 
