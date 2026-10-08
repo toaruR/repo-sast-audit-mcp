@@ -1,0 +1,327 @@
+{
+  "$id": "d",
+  "Sev": {
+    "enum": [
+      "critical",
+      "high",
+      "medium",
+      "low",
+      "info"
+    ]
+  },
+  "Conf": {
+    "enum": [
+      "high",
+      "medium",
+      "low"
+    ]
+  },
+  "Scn": {
+    "enum": [
+      "dependency",
+      "secret",
+      "static",
+      "config"
+    ]
+  },
+  "St": {
+    "enum": [
+      "queued",
+      "running",
+      "completed",
+      "failed",
+      "cancelled",
+      "timed_out"
+    ]
+  },
+  "Sid": {
+    "type": "string",
+    "pattern": "^S-[0-9a-f]{12}-[0-9]+$"
+  },
+  "N": {
+    "type": "integer",
+    "minimum": 0
+  },
+  "Lim": {
+    "type": "object",
+    "required": [
+      "default",
+      "min",
+      "max"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "default": {
+        "$ref": "d#/N"
+      },
+      "min": {
+        "$ref": "d#/N"
+      },
+      "max": {
+        "$ref": "d#/N"
+      }
+    }
+  },
+  "P": {
+    "type": "integer",
+    "minimum": 1
+  },
+  "SL": {
+    "type": "array",
+    "items": {
+      "type": "string"
+    }
+  },
+  "Globs": {
+    "type": "array",
+    "items": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "maxItems": 50
+  },
+  "Err": {
+    "type": "object",
+    "required": [
+      "code",
+      "message",
+      "retryable"
+    ],
+    "properties": {
+      "code": {
+        "type": "string",
+        "pattern": "^E_[A-Z_]+$"
+      },
+      "message": {
+        "type": "string"
+      },
+      "retryable": {
+        "type": "boolean"
+      }
+    }
+  },
+  "Loc": {
+    "type": "object",
+    "required": [
+      "path",
+      "line",
+      "column"
+    ],
+    "properties": {
+      "path": {
+        "type": "string"
+      },
+      "line": {
+        "$ref": "d#/P"
+      },
+      "column": {
+        "$ref": "d#/P"
+      }
+    }
+  },
+  "Wrn": {
+    "type": "object",
+    "required": [
+      "code",
+      "message",
+      "count"
+    ],
+    "properties": {
+      "code": {
+        "type": "string"
+      },
+      "message": {
+        "type": "string"
+      },
+      "path": {
+        "type": "string"
+      },
+      "count": {
+        "$ref": "d#/P"
+      }
+    }
+  },
+  "Prog": {
+    "type": "object",
+    "required": [
+      "filesScanned",
+      "bytesScanned",
+      "findingsSoFar"
+    ],
+    "properties": {
+      "filesScanned": {
+        "$ref": "d#/N"
+      },
+      "bytesScanned": {
+        "$ref": "d#/N"
+      },
+      "findingsSoFar": {
+        "$ref": "d#/N"
+      }
+    }
+  },
+  "Sum": {
+    "type": "object",
+    "required": [
+      "total",
+      "bySeverity",
+      "byScanner",
+      "riskScore",
+      "riskRating",
+      "truncated"
+    ],
+    "properties": {
+      "total": {
+        "$ref": "d#/N"
+      },
+      "bySeverity": {
+        "type": "object",
+        "propertyNames": {
+          "$ref": "d#/Sev"
+        },
+        "additionalProperties": {
+          "$ref": "d#/N"
+        }
+      },
+      "byScanner": {
+        "type": "object",
+        "propertyNames": {
+          "$ref": "d#/Scn"
+        },
+        "additionalProperties": {
+          "$ref": "d#/N"
+        }
+      },
+      "riskScore": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100
+      },
+      "riskRating": {
+        "enum": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "critical"
+        ]
+      },
+      "truncated": {
+        "type": "boolean"
+      }
+    }
+  },
+  "Fnd": {
+    "type": "object",
+    "required": [
+      "id",
+      "ruleId",
+      "scanner",
+      "title",
+      "severity",
+      "confidence",
+      "cwe",
+      "location",
+      "evidence",
+      "message",
+      "remediation",
+      "fingerprint",
+      "occurrence"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "pattern": "^F-[0-9a-f]{16}(-[0-9]+)?$"
+      },
+      "ruleId": {
+        "type": "string",
+        "maxLength": 64
+      },
+      "scanner": {
+        "$ref": "d#/Scn"
+      },
+      "title": {
+        "type": "string"
+      },
+      "severity": {
+        "$ref": "d#/Sev"
+      },
+      "confidence": {
+        "$ref": "d#/Conf"
+      },
+      "cwe": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^CWE-[0-9]+$"
+        }
+      },
+      "location": {
+        "$ref": "d#/Loc"
+      },
+      "evidence": {
+        "type": "string",
+        "maxLength": 200
+      },
+      "message": {
+        "type": "string"
+      },
+      "remediation": {
+        "type": "string"
+      },
+      "fingerprint": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{32}$"
+      },
+      "occurrence": {
+        "$ref": "d#/P"
+      },
+      "advisoryId": {
+        "type": "string"
+      },
+      "relatedRuleIds": {
+        "$ref": "d#/SL"
+      },
+      "cvss": {
+        "type": "object",
+        "required": [
+          "score",
+          "version"
+        ],
+        "properties": {
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "package": {
+        "type": "object",
+        "required": [
+          "ecosystem",
+          "name",
+          "version"
+        ],
+        "properties": {
+          "ecosystem": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "fixedIn": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "additionalProperties": false
+  }
+}

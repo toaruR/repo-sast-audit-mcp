@@ -1,0 +1,13 @@
+const a=require('assert'),F=Math.floor;
+const f=require('fs').readFileSync(process.argv[2],'utf8'),g=r=>f.match(r),[,P,D]=g(/PER_FILE_BUDGET_MS\/CANCEL_DRAIN_MS\|(\d+)\/(\d+)\|/).map(Number),T=+g(/timeoutMs`\|(\d+)\|/)[1];
+const sim=(w,c)=>[c?'cancelled':'timed_out',(c?0:T)+(w<D?w:D)];
+const rt=s=>s<1?'none':s<10?'low':s<30?'medium':s<60?'high':'critical';
+const sc=r=>r?Math.max(1,Math.min(100,F((r+5)/10))):0;
+const sv=c=>c>=9?'critical':c>=7?'high':c>=4?'medium':c>=.1?'low':'info';
+const o={A:sim(P,1),B:sim(1/0,1),C:sim(1/0,0)};
+for(const k in o)console.log(k,...o[k]);
+const L=(n,v,f)=>console.log(n,v.map(x=>x+' '+f(x)).join(' | '));
+L('score',[0,1,9,10,29,30,59,60,100],rt);
+L('raw10',[94,95,294,295,594,595],sc);
+L('cvss',[9,8.9,7,6.9,4,3.9,.1,0],sv);
+a.deepEqual(o.C,['timed_out',123000]);a.equal(sc(595),60);a.equal(sv(.1),'low');

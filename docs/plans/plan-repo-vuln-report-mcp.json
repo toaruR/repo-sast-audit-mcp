@@ -1,0 +1,2890 @@
+{
+  "plan_version": 1,
+  "summary": "Risk-first ordering with a walking skeleton. Risk ranking (highest first) and why each item sits where it does: R1 toolchain and dependency install (npm ci on a committed lockfile, re2-wasm and SDK major pins, tsc over non-empty src, ESLint ban rules proven by probes) is T001 because every later task fails if it fails. R2 cross-component integration of MCP stdio server, job registry, real worker thread and polled get_scan_status, with a fake OSV transport, is T002 (walking skeleton, design 3.2/3.3/4.1/6), reached right after the toolchain so integration errors surface before detailed logic exists; later tasks keep its file names and tool contract and replace its internals (T045, T047, T059; job.stubResult is preserved through T045-T046 and removed in T047). R3 cancel/timeout concurrency is T003-T005 (error catalogue and transition table, drain rows and first-wins, cancel controller on an injectable fake clock and stub worker): it needs only constants.ts from T001 and is the hardest semantics. R4 network confinement and the OSV client on a fake transport is T006; real HTTP is never exercised by tests. R5 constants tests T007-T010 are cheap guards over src/constants.ts and carry no integration risk, so they sit behind R1-R4. R6 pure logic follows in dependency order: scoring (T011-T012), secrets (T013-T017, G3), path and output-dir security (T018-T021), finding identity/dedupe/truncation (T022-T024, G2), walker/reader (T025-T028), rules and scanners (T029-T039), contracts and envelope (T040-T044), job manager and execution (T045-T048), get_findings, writer and reports (T049-T056), list_scanners and the full 6-tool server (T057-T059), fixtures and e2e (T060-T063) and a traceability gate (T064) over goals G1-G6, section 9 failure modes (every F-id, cited in test titles) and section 11 trade-offs. The chain is linear on purpose: the implement loop is sequential and needs a unique deterministic order, so each task depends on its immediate predecessor (T001 -> T002 -> ... -> T064, contiguous ids). Risk order is encoded by position: the three riskiest unknowns (toolchain, stdio+worker integration, cancel/timeout) occupy positions 1, 2 and 3-5. Rollback/partial-state policy: every task is additive or an in-place extension (shared files such as src/scanners/secret.ts, src/security/paths.ts, rules/rules.json, schemas/tools.json, src/jobs/jobManager.ts, src/jobs/worker.ts, src/server.ts are extended, never replaced wholesale) and each intent states what exists, what is absent and which verify command proves green; the full-suite command (tsc --noEmit plus node --import tsx --test test/*.test.ts) is a verify of nearly every task from T002, so the project can stop after any task in a consistent state. From T002 the engine is reachable over stdio with two tools; the full 6-tool contract is served from T059. Verify-command policy: all commands run from the repo root in a POSIX shell (Git Bash/sh); the test glob test/*.test.ts is expanded by that shell (node --test with a directory argument does not discover .ts tests). Negative checks are plain grep/eslint/script commands with expect_exit_code 1 (grep: 1 = no match, 2 = error fails), each paired with a temp-tree fixture proof that the pattern exits 0 on forbidden snippets and 1 on clean code. Headings with no implementation of their own: none; the title is covered by T001, \"1. Goals / non-goals\" by T062-T064; out-of-scope items are non-goals.",
+  "tasks": [
+    {
+      "id": "T001",
+      "title": "Toolchain install, scaffold and constants module",
+      "intent": "Make the toolchain real first (highest external uncertainty). Create ESM TS5 package repo-vuln-report-mcp (type module, engines.node \">=20.11 <23\"), exactly the 9 runtime deps of 2.1 with their major pins, devDependencies typescript/tsx/eslint/typescript-eslint/@types/node, generated package-lock.json (run npm install once, then npm ci must pass), strict tsconfig, ESLint ban rules (child_process, node:vm, eval, dynamic import(); fs writes only in src/report/writer.ts; network only in src/net/osvClient.ts), and src/constants.ts exporting every 2.2 row by name (LIMITS = {maxFiles,maxFileBytes,maxTotalBytes,maxFindings,timeoutMs,waitMs} each {default,min,max}; all scalar names; ENV names; DEFAULT_OPTIONS). process.env is read only in constants.ts. DEP_MAX is declared literally as `export const DEP_MAX = 9`; tsconfig.json is plain JSON without comments (so node can parse it). Ban rules are ESLint no-restricted-imports / no-restricted-syntax (ImportExpression, CallExpression[callee.name=eval|require], child_process and node:vm imports) whose messages start with \"BANNED:\", so a verify probe can prove each fires. Dynamic import() and require() are also forbidden by the textual grep below (cheap belt) in addition to the ESLint AST rule (proof by probe). Rollback/partial: after this task the tree has package.json, package-lock.json, tsconfig.json, eslint.config.js and src/constants.ts (nothing imports them yet); every test, scanner, job, tool and server file do not exist yet, so nothing is half-wired; the state is green when `npm ci` and `npx tsc --noEmit` (non-empty src) exit 0. Revert (after its dependents) = undo package.json, package-lock.json, tsconfig.json, eslint.config.js, src/constants.ts.",
+      "depends_on": [],
+      "design_refs": [
+        "Design: repo-vuln-report-mcp (read-only repo vulnerability scan + report MCP server)",
+        "2. Stack and constants",
+        "2.1 Stack",
+        "2.2 Constants (options, limits, env)"
+      ],
+      "changes": [
+        {
+          "path": "package.json",
+          "kind": "add"
+        },
+        {
+          "path": "package-lock.json",
+          "kind": "add"
+        },
+        {
+          "path": "tsconfig.json",
+          "kind": "add"
+        },
+        {
+          "path": "eslint.config.js",
+          "kind": "add"
+        },
+        {
+          "path": "src/constants.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "`npm ci` (verify[0]) exits 0 against the committed package-lock.json",
+        "verify[1] (node -e over package.json) exits 0: dependencies has exactly 9 keys (DEP_MAX=9), each range starting with its 2.1 major (sdk 1, zod 3, re2-wasm 1, ignore 5, picomatch 4, semver 7, yaml 2, smol-toml 1, fast-xml-parser 4); engines.node equals \">=20.11 <23\"; type equals \"module\"; tsconfig.json compilerOptions.strict is true",
+        "verify[3] `npx eslint src` exits 0 and verify[4] feeds five probe snippets (import(), eval(), require(), child_process import, node:vm import) to `eslint --stdin --stdin-filename src/probe.ts` and each output contains \"BANNED:\"; verify[9] pipes a single `eval(\"1\");` line to the same eslint --stdin command and its exit code is exactly 1 (eslint reports an error)",
+        "verify[2] `npx tsc --noEmit` exits 0 over the non-empty src (verify[5] grep finds \"export\" in src; verify[6] finds the literal `export const DEP_MAX = 9` in src/constants.ts)",
+        "verify[7] (forbidden-pattern grep over src for child_process, node:vm, eval(, import( and require( ) has expect_exit_code 1 (grep status 1 = no match; status 2 = missing src or grep error is not 1 and fails), and verify[8] proves on a temp tree that the same grep exits 0 for each of the five forbidden snippets and 1 for clean code"
+      ],
+      "verify": [
+        {
+          "command": "npm ci",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "node -e \"const p=require('./package.json');const d=p.dependencies;const m={'@modelcontextprotocol/sdk':1,zod:3,'re2-wasm':1,ignore:5,picomatch:4,semver:7,yaml:2,'smol-toml':1,'fast-xml-parser':4};const ok=Object.keys(d).length===9&&Object.keys(m).every(k=>d[k]&&parseInt(d[k].replace(/^[^0-9]*/,''))===m[k])&&p.engines.node==='>=20.11 <23'&&p.type==='module'&&require('./tsconfig.json').compilerOptions.strict===true;process.exit(ok?0:1)\"",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx eslint src",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "for s in 'import(\"x\");' 'eval(\"1\");' 'require(\"fs\");' 'import cp from \"node:child_process\";' 'import vm from \"node:vm\";'; do printf '%s\\n' \"$s\" | npx eslint --stdin --stdin-filename src/probe.ts 2>&1 | grep -q \"BANNED:\" || exit 1; done",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "grep -rq \"export\" src",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "grep -q \"export const DEP_MAX = 9\" src/constants.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "grep -rEn \"(^|[^A-Za-z0-9_.])(eval|import|require)[[:space:]]*\\(|child_process|node:vm\" src",
+          "expect_exit_code": 1
+        },
+        {
+          "command": "d=$(mktemp -d); rc=0; mkdir -p \"$d/src/x\" || rc=1; for s in 'import cp from \"node:child_process\";' 'import vm from \"node:vm\";' 'eval(\"1\");' 'const m = await import(\"x\");' 'const r = require(\"fs\");'; do printf '%s\n' \"$s\" > \"$d/src/p.ts\"; grep -rEn \"(^|[^A-Za-z0-9_.])(eval|import|require)[[:space:]]*\\(|child_process|node:vm\" \"$d/src\" >/dev/null || rc=1; done; printf '%s\n' 'const a = createRequire(u); const b = evaluate(1); const c = reimport(2); import x from \"y\";' > \"$d/src/p.ts\"; grep -rEn \"(^|[^A-Za-z0-9_.])(eval|import|require)[[:space:]]*\\(|child_process|node:vm\" \"$d/src\" >/dev/null; [ $? -eq 1 ] || rc=1; rm -rf \"$d\"; [ $rc -eq 0 ]",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "printf 'eval(\"1\");\\n' | npx eslint --stdin --stdin-filename src/probe.ts >/dev/null 2>&1",
+          "expect_exit_code": 1
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T002",
+      "title": "Walking skeleton: stdio server, scan_repository stub, worker thread, get_scan_status",
+      "intent": "Reach the riskiest integration early: one thin end-to-end path through the real MCP stdio transport, a job registry, a real worker_threads worker and a polled status call, using a fake OSV transport. Create src/index.ts (stdio entry, connects the server and exits when stdin closes), src/server.ts (SDK server registering ONLY scan_repository and get_scan_status; handlers call the job manager directly, no schema validation, no path security, no error envelope yet), src/jobs/jobManager.ts (minimal registry: submit(repoPath) creates scanId S-<12 hex>-<counter>, starts a Worker on src/jobs/worker.ts via execArgv [\"--import\",\"tsx\"], keeps a 3-valued flag queued/running/completed and the worker result as job.stubResult; getStatus(scanId) returns {scanId,state,progress:{filesScanned},cancelRequested:false,truncated:false}) and src/jobs/worker.ts (stub worker: counts the entries of repoPath one level deep, calls an in-file fakeOsvTransport(request) that returns a canned empty advisory list and counts its calls, posts {filesScanned,threadId,osvCalls} (threadId is worker_threads.threadId read inside the worker)). The skeleton contains no network API (the fake transport is a plain function) and does not read process.env. It is deliberately throw-away in its internals: later tasks keep file names and the stdio/tool contract and replace internals. Rollback/partial: after this task the tree has the stdio entry, a two-tool server, a minimal job registry and a stub worker; real validation, scanners, cancel handling and the other four tools do not exist yet, so nothing is half-wired (the stub states its own limits and nothing else imports it); the state is green when `node --import tsx --test test/skeleton-e2e.test.ts` and the full-suite command exit 0. Revert (after its dependents) = undo src/index.ts, src/server.ts, src/jobs/jobManager.ts, src/jobs/worker.ts, test/skeleton-e2e.test.ts.",
+      "depends_on": [
+        "T001"
+      ],
+      "design_refs": [
+        "3.2 `scan_repository`",
+        "3.3 `get_scan_status` / `cancel_scan`",
+        "4. Pipeline and scanners",
+        "4.1 Dependency scanner",
+        "6. Job state machine"
+      ],
+      "changes": [
+        {
+          "path": "src/index.ts",
+          "kind": "add"
+        },
+        {
+          "path": "src/server.ts",
+          "kind": "add"
+        },
+        {
+          "path": "src/jobs/jobManager.ts",
+          "kind": "add"
+        },
+        {
+          "path": "src/jobs/worker.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/skeleton-e2e.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/skeleton-e2e.test.ts, test \"skeleton: tools/list over stdio\": an SDK client connected to a child `node --import tsx src/index.ts` over StdioClientTransport gets a tools list whose names include scan_repository and get_scan_status",
+        "test/skeleton-e2e.test.ts, test \"skeleton: scan then poll\": callTool scan_repository with repoPath of a temp dir holding 1 file returns structuredContent.scanId matching /^S-[0-9a-f]{12}-[0-9]+$/ and state in [queued,running,completed]; polling get_scan_status (at most 50 polls, 100 ms apart) reaches state completed with progress.filesScanned equal to 1",
+        "test \"skeleton-stub: job runs on a worker thread\": test/skeleton-e2e.test.ts imports { threadId } from \"node:worker_threads\"; for an in-process JobManager scan it asserts assert.notStrictEqual(job.stubResult.threadId, threadId) (the test process runs on the main thread, threadId 0; the worker thread has threadId >= 1); verify[4] greps that assertion line",
+        "test/skeleton-e2e.test.ts, test \"skeleton-stub: fake OSV transport\": job.stubResult.osvCalls equals 1 while globalThis.fetch is replaced in the test process by a stub that records calls and its call count stays 0",
+        "test/skeleton-e2e.test.ts, test \"skeleton: stdin close ends the server\": after client.close() the child process exits with code 0 within 2000 ms (no hang)"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/skeleton-e2e.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx eslint src",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "grep -q \"new Worker(\" src/jobs/jobManager.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "grep -q \"notStrictEqual(job.stubResult.threadId, threadId)\" test/skeleton-e2e.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 3
+    },
+    {
+      "id": "T003",
+      "title": "Error catalogue and state-machine transition table",
+      "intent": "Create src/errors.ts with the 16 E_* codes of 3.1 and the retryable flag helper, and src/jobs/stateMachine.ts transition(job,event) pure for the first rows of the section 6 table. Events: slot, cancel, done, internalError, strictCap (cancel/timeout drain events come in the next task). Rollback/partial: after this task the tree has errors.ts and the first 5 table rows of transition(); drain rows and exhaustive-throw logic do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/state-machine-table.test.ts`. Revert (after its dependents) = undo src/jobs/stateMachine.ts, src/errors.ts, test/state-machine-table.test.ts.",
+      "depends_on": [
+        "T002"
+      ],
+      "design_refs": [
+        "6. Job state machine",
+        "3.1 Error codes"
+      ],
+      "changes": [
+        {
+          "path": "src/jobs/stateMachine.ts",
+          "kind": "add"
+        },
+        {
+          "path": "src/errors.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/state-machine-table.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/state-machine-table.test.ts, test \"table: queued+slot\": transition({state:queued},slot) returns state running and error undefined",
+        "test/state-machine-table.test.ts, test \"table: queued+cancel\": result state cancelled, error E_CANCELLED",
+        "test/state-machine-table.test.ts, test \"table: running+done\": result state completed, error undefined",
+        "test/state-machine-table.test.ts, test \"table: running+internalError\": result state failed, error E_INTERNAL",
+        "test/state-machine-table.test.ts, test \"table: running+strictCap\": result state failed, error E_LIMIT_EXCEEDED",
+        "test/state-machine-table.test.ts, test \"error catalogue\": assert.deepStrictEqual(Object.keys(ERROR_CODES).sort(), the 16 E_* names of 3.1 sorted) and the length is 16 (ERROR_CODES exported from src/errors.ts)"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/state-machine-table.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T004",
+      "title": "State machine: drain rows, exhaustiveness and first-wins",
+      "intent": "Extend transition() with the drain rows and enforce purity, exhaustiveness and first-event-wins per section 6. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has the complete section 6 transition function; timers, AbortController and any runtime do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/state-machine-rules.test.ts`. Revert (after its dependents) = undo src/jobs/stateMachine.ts, test/state-machine-rules.test.ts.",
+      "depends_on": [
+        "T003"
+      ],
+      "design_refs": [
+        "6. Job state machine",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/jobs/stateMachine.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/state-machine-rules.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/state-machine-rules.test.ts, test \"running + cancel drained (and + CANCEL_DRAIN_MS\": running + cancel drained (and + CANCEL_DRAIN_MS expiry after cancel) => cancelled with error E_CANCELLED",
+        "test/state-machine-rules.test.ts, test \"running + timeout drained (and +\": running + timeout drained (and + CANCEL_DRAIN_MS expiry after timeout) => timed_out with error E_TIMEOUT",
+        "test/state-machine-rules.test.ts, test \"every (state,event) pair outside the 6-row\": every (state,event) pair outside the 6-row table throws, including every pair from a terminal state (loop over all states x all events)",
+        "test/state-machine-rules.test.ts, test \"transition does not mutate its input\": transition does not mutate its input (deep-equal before and after)",
+        "test/state-machine-rules.test.ts, test \"a second event applied after the first on the\": a second event applied after the first on the same job is rejected (first wins)",
+        "test/state-machine-rules.test.ts, test \"late output after a terminal state is dropped\": late output after a terminal state is dropped with no state change"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/state-machine-rules.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T005",
+      "title": "Cancel/timeout controller with injectable clock and stub worker",
+      "intent": "Highest-risk concurrency moved early. Implement src/jobs/cancelController.ts driving transition() with an injectable fake clock, an AbortController and a stub worker (no real scanning): cancel, timeoutMs, CANCEL_DRAIN_MS forced abort, first-processed-wins precedence of section 3.2/6. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has cancelController.ts exercised only with a fake clock and stub worker; real worker, job manager and tools do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/cancel-controller.test.ts` (fake timers, no real waiting). Revert (after its dependents) = undo src/jobs/cancelController.ts, test/cancel-controller.test.ts.",
+      "depends_on": [
+        "T004"
+      ],
+      "design_refs": [
+        "6. Job state machine",
+        "3.3 `get_scan_status` / `cancel_scan`",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/jobs/cancelController.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/cancel-controller.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/cancel-controller.test.ts, test \"T-08 A (F-09a): cancel at t=0 with a worker\": T-08 A (F-09a): cancel at t=0 with a worker that ends at PER_FILE_BUDGET_MS => state cancelled, durationMs 2000",
+        "test/cancel-controller.test.ts, test \"T-08 B (F-09a): cancel with a hung worker\": T-08 B (F-09a): cancel with a hung worker => state cancelled, durationMs 3000, error E_CANCELLED",
+        "test/cancel-controller.test.ts, test \"T-08 C (F-09): hung worker, no cancel,\": T-08 C (F-09): hung worker, no cancel, timeoutMs 120000 => state timed_out, durationMs 123000, error E_TIMEOUT",
+        "test/cancel-controller.test.ts, test \"cancel on a queued job\": cancel on a queued job => cancelled immediately with no timer scheduled",
+        "test/cancel-controller.test.ts, test \"cancel and strictCap processed in the same tick\": cancel and strictCap processed in the same tick => state cancelled (cancel first)",
+        "test/cancel-controller.test.ts, test \"cancel calls AbortController.abort() exactly\": cancel calls AbortController.abort() exactly once and signal.aborted is true afterwards"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/cancel-controller.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T006",
+      "title": "OSV client with injectable fake transport and network gate",
+      "intent": "Second highest uncertainty moved early. Implement src/net/osvClient.ts: only module with network API; takes an injected transport (default real fetch transport is created lazily and never used in tests) and a networkAllowed flag read from constants.ts; builds request bodies with exactly {ecosystem,name,version}. Rollback/partial: after this task the tree has osvClient.ts with a fake-transport test; real HTTP is never exercised; the dependency scanner that calls it does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/osv-client.test.ts` and the net-confinement grep plus its fixture proof (a temp tree with a violating file proves the pattern is detected and that only the net directory is exempt). The skeleton's in-file fakeOsvTransport is replaced by this client's injected transport in the scan-execution task. Revert (after its dependents) = undo src/net/osvClient.ts, test/osv-client.test.ts.",
+      "depends_on": [
+        "T003",
+        "T005"
+      ],
+      "design_refs": [
+        "4.1 Dependency scanner",
+        "9. Failure modes",
+        "11. Defense trade-offs"
+      ],
+      "changes": [
+        {
+          "path": "src/net/osvClient.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/osv-client.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/osv-client.test.ts, test \"request body JSON keys equal exactly\": request body JSON keys equal exactly [\"ecosystem\",\"name\",\"version\"]",
+        "test/osv-client.test.ts, test \"extra input fields (for example path, line)\": extra input fields (for example path, line) never appear in the request body (spy test)",
+        "test/osv-client.test.ts, test \"network disabled by default\": with VULN_MCP_ALLOW_NETWORK unset, await client.query([{ecosystem:\"npm\",name:\"lodash\",version:\"4.17.20\"}]) rejects with error.code === \"E_NETWORK_DISABLED\"",
+        "test/osv-client.test.ts, test \"no transport call when disabled\": with VULN_MCP_ALLOW_NETWORK unset, after constructing the client and one rejected query() the fake transport call count === 0 (0 network calls)",
+        "test/osv-client.test.ts, test \"one call per package when enabled\": with VULN_MCP_ALLOW_NETWORK=1 and N distinct packages queried, the fake transport call count === N (exactly once per package)",
+        "verify[4] net-confinement grep over src (excluding src/net) has expect_exit_code 1 (grep status 1 = no match; status 2 fails), and verify[5] proves on a temp tree that the same pattern exits 0 on https/fetch/net/WebSocket/undici snippets, 1 on clean code, and ignores a violating file placed under a net directory"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/osv-client.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx eslint src",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "grep -rq \"export\" src --exclude-dir=net",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "grep -rEn \"(from|require\\()[[:space:]]*[\\\"'](node:)?(https?|net|tls|dgram|dns|http2)[\\\"']|(^|[^A-Za-z0-9_.])fetch\\(|XMLHttpRequest|WebSocket|undici\" src --exclude-dir=net",
+          "expect_exit_code": 1
+        },
+        {
+          "command": "d=$(mktemp -d); rc=0; mkdir -p \"$d/src/net\" || rc=1; for s in 'import h from \"node:https\";' 'const r = await fetch(u);' 'import n from \"net\";' 'const w = new WebSocket(u);' 'import { request } from \"undici\";'; do printf '%s\n' \"$s\" > \"$d/src/p.ts\"; grep -rEn \"(from|require\\()[[:space:]]*[\\\"'](node:)?(https?|net|tls|dgram|dns|http2)[\\\"']|(^|[^A-Za-z0-9_.])fetch\\(|XMLHttpRequest|WebSocket|undici\" \"$d/src\" --exclude-dir=net >/dev/null || rc=1; done; printf '%s\n' 'import h from \"node:https\";' > \"$d/src/net/ok.ts\"; printf '%s\n' 'const f = prefetch(u); import x from \"node:path\"; const s = new Set();' > \"$d/src/p.ts\"; grep -rEn \"(from|require\\()[[:space:]]*[\\\"'](node:)?(https?|net|tls|dgram|dns|http2)[\\\"']|(^|[^A-Za-z0-9_.])fetch\\(|XMLHttpRequest|WebSocket|undici\" \"$d/src\" --exclude-dir=net >/dev/null; [ $? -eq 1 ] || rc=1; rm -rf \"$d\"; [ $rc -eq 0 ]",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T007",
+      "title": "Constants test: options.limits ranges",
+      "intent": "Assert the six numeric limit rows of 2.2 (default/min/max) through LIMITS in src/constants.ts. Rollback/partial: after this task the tree has the limits test only (src/constants.ts from the toolchain task is untouched); size, runtime and env tests do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/constants-limits.test.ts`. Revert (after its dependents) = undo test/constants-limits.test.ts.",
+      "depends_on": [
+        "T001",
+        "T006"
+      ],
+      "design_refs": [
+        "2.2 Constants (options, limits, env)"
+      ],
+      "changes": [
+        {
+          "path": "test/constants-limits.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/constants-limits.test.ts, test \"limits: maxFiles\": assert.deepStrictEqual(LIMITS.maxFiles, {default:50000,min:1,max:500000})",
+        "test/constants-limits.test.ts, test \"limits: maxFileBytes\": assert.deepStrictEqual(LIMITS.maxFileBytes, {default:1048576,min:1024,max:8388608})",
+        "test/constants-limits.test.ts, test \"limits: maxTotalBytes\": assert.deepStrictEqual(LIMITS.maxTotalBytes, {default:536870912,min:1048576,max:4294967296})",
+        "test/constants-limits.test.ts, test \"limits: maxFindings\": assert.deepStrictEqual(LIMITS.maxFindings, {default:5000,min:1,max:50000})",
+        "test/constants-limits.test.ts, test \"limits: timeoutMs\": assert.deepStrictEqual(LIMITS.timeoutMs, {default:120000,min:1000,max:900000})",
+        "test/constants-limits.test.ts, test \"limits: waitMs\": assert.deepStrictEqual(LIMITS.waitMs, {default:0,min:0,max:30000})"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/constants-limits.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T008",
+      "title": "Constants test: size and length constants",
+      "intent": "Table-driven assertions on the size/length rows of 2.2 (one table row per acceptance item). Rollback/partial: after this task the tree has the sizes test file; runtime/secret constant tests do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/constants-sizes.test.ts`. Revert (after its dependents) = undo test/constants-sizes.test.ts.",
+      "depends_on": [
+        "T007"
+      ],
+      "design_refs": [
+        "2.2 Constants (options, limits, env)"
+      ],
+      "changes": [
+        {
+          "path": "test/constants-sizes.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/constants-sizes.test.ts, test \"sizes: globs and prefix\": assert.strictEqual(GLOB_N, 50), assert.strictEqual(GLOB_LEN, 256), assert.strictEqual(PATHPREFIX_MAX, 1024)",
+        "test/constants-sizes.test.ts, test \"sizes: paging\": assert.strictEqual(GET_FINDINGS_MAX, 200), assert.strictEqual(CURSOR_MAX, 256)",
+        "test/constants-sizes.test.ts, test \"sizes: path and rule id\": assert.strictEqual(PATH_MAX, 4096), assert.strictEqual(RULEID_MAX, 64)",
+        "test/constants-sizes.test.ts, test \"sizes: walker and lockfile\": assert.strictEqual(MAX_DEPTH, 64), assert.strictEqual(LINE_MAX, 5000), assert.strictEqual(LOCKFILE_MAX_BYTES, 16777216)",
+        "test/constants-sizes.test.ts, test \"sizes: probe and secret window\": assert.strictEqual(BINARY_PROBE_BYTES, 8192), assert.strictEqual(SECRET_WINDOW_BYTES, 4096)",
+        "test/constants-sizes.test.ts, test \"sizes: evidence\": assert.strictEqual(EVIDENCE_MAX, 200)"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/constants-sizes.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T009",
+      "title": "Constants test: runtime, timing and secret thresholds",
+      "intent": "Table-driven assertions on the remaining scalar rows of 2.2. Rollback/partial: after this task the tree has the runtime constants test file; env/default tests do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/constants-runtime.test.ts`. Revert (after its dependents) = undo test/constants-runtime.test.ts.",
+      "depends_on": [
+        "T008"
+      ],
+      "design_refs": [
+        "2.2 Constants (options, limits, env)"
+      ],
+      "changes": [
+        {
+          "path": "test/constants-runtime.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/constants-runtime.test.ts, test \"runtime: targets\": assert.strictEqual(PERF_TARGET_S, 20), assert.strictEqual(PEAK_RSS_MIB, 400), assert.strictEqual(DEP_MAX, 9)",
+        "test/constants-runtime.test.ts, test \"runtime: job slots\": assert.strictEqual(MAX_RUNNING, 2), assert.strictEqual(MAX_QUEUED, 8), assert.strictEqual(JOB_KEEP, 20)",
+        "test/constants-runtime.test.ts, test \"runtime: timing\": assert.strictEqual(PER_FILE_BUDGET_MS, 2000), assert.strictEqual(CANCEL_DRAIN_MS, 3000)",
+        "test/constants-runtime.test.ts, test \"runtime: staleness and cache\": assert.strictEqual(STALE_DAYS, 30), assert.strictEqual(ABORT_CHECK_LINES, 1000), assert.strictEqual(SHARD_LRU, 256)",
+        "test/constants-runtime.test.ts, test \"runtime: secret thresholds\": assert.strictEqual(SECRET_MIN_LEN, 20), assert.strictEqual(HEX_MIN_LEN, 32), assert.strictEqual(ENT_ALNUM_MILLI, 4000), assert.strictEqual(ENT_HEX_MILLI, 3200)",
+        "test/constants-runtime.test.ts, test \"runtime: redaction\": assert.strictEqual(REDACT_PREFIX, 4), assert.strictEqual(LEAK_SUBSTR, 5)"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/constants-runtime.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T010",
+      "title": "Constants test: env names, option defaults and env-read hygiene",
+      "intent": "Assert env variable names, option defaults and that process.env is touched only in src/constants.ts. Rollback/partial: after this task the tree has the env/default test file; any non-test consumer of env does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/constants-env.test.ts` and the exact-file grep. Revert (after its dependents) = undo test/constants-env.test.ts.",
+      "depends_on": [
+        "T009"
+      ],
+      "design_refs": [
+        "2.2 Constants (options, limits, env)"
+      ],
+      "changes": [
+        {
+          "path": "test/constants-env.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/constants-env.test.ts, test \"env names\": assert.deepStrictEqual(Object.values(ENV).sort(), the six names VULN_MCP_ALLOWED_ROOTS, VULN_MCP_OUTPUT_ROOT, VULN_MCP_ALLOW_NETWORK, VULN_MCP_FIXED_TIME, VULN_MCP_DB_STALE_DAYS, VULN_MCP_ADVISORY_DB sorted)",
+        "test/constants-env.test.ts, test \"option defaults\": assert.deepStrictEqual(DEFAULT_OPTIONS, {strictLimits:false,online:false,symlinkPolicy:\"skip\",respectGitignore:true,includeGlobs:[],excludeGlobs:[]})",
+        "test/constants-env.test.ts, test \"tool defaults\": assert.deepStrictEqual(TOOL_DEFAULTS, {force:false,getFindings:{limit:50,includeEvidence:true},generateReport:{formats:[\"md\",\"json\"],allowWriteInsideTarget:false,allowPartial:false,includeEvidence:true}}) (TOOL_DEFAULTS is exported from src/constants.ts)",
+        "test/constants-env.test.ts, test \"env hygiene\": the test walks src recursively with fs.readdirSync and asserts the list of files whose text contains \"process.env\" deep-equals [\"src/constants.ts\"] (containing constants.ts proves the walk is not empty)",
+        "verify[2] `grep -rq \"process\\.env\" src/constants.ts` exits 0 and verify[3] prints exactly src/constants.ts as the only file under src containing process.env, and verify[4] (same grep with --exclude=constants.ts) has expect_exit_code 1 (no other file mentions process.env)"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/constants-env.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "grep -rq \"process\\.env\" src/constants.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "test \"$(grep -rl 'process\\.env' src)\" = \"src/constants.ts\"",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "grep -rl 'process\\.env' src --exclude=constants.ts",
+          "expect_exit_code": 1
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T011",
+      "title": "Risk score and worked numbers (pure)",
+      "intent": "Design test T-02 (scoring/CVSS boundary table: low/low 4 => 1, info/high 0 => 0, critical/medium 175 => 18, raw10 boundaries, section 8 stdout) is implemented by the tests titled \"T-02 ...\" here and in T012. Implement riskScore and by_score riskRating (5.2 with W, M10) as pure functions in src/scoring.ts. Store the section 8 script as test/fixtures/n.cjs. Rollback/partial: after this task the tree has scoring.ts riskScore/by_score and the n.cjs script; CVSS mapping and by_worst do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/scoring.test.ts` and `node test/fixtures/n.cjs ...` exit 0. Revert (after its dependents) = undo src/scoring.ts, test/scoring.test.ts, test/fixtures/n.cjs.",
+      "depends_on": [
+        "T001",
+        "T006",
+        "T010"
+      ],
+      "design_refs": [
+        "5.2 Risk score",
+        "8. Worked numbers"
+      ],
+      "changes": [
+        {
+          "path": "src/scoring.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/scoring.test.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/fixtures/n.cjs",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "verify[2] `node test/fixtures/n.cjs docs/design-repo-vuln-report-mcp.md` exits 0 and prints the 7-line stdout block of section 8 verbatim; test \"T-02 section 8 script\" in test/scoring.test.ts compares the script stdout line by line with that block",
+        "test/scoring.test.ts, test \"T-02 rounding boundaries\": riskScore of a finding list whose raw10 sum is 94 equals 9 and with raw10 95 equals 10",
+        "test/scoring.test.ts, test \"T-02 rounding boundaries 59/60\": riskScore with raw10 594 equals 59 and with raw10 595 equals 60",
+        "test/scoring.test.ts, test \"T-02 low floor\": a low/low finding (raw10 4) gives riskScore 1 (not 0) and by_score rating low",
+        "test/scoring.test.ts, test \"T-02 zero\": no findings, and one info/high finding (raw10 0), give riskScore 0 and rating none",
+        "test/scoring.test.ts, test \"T-02 critical/medium\": a critical/medium finding (raw10 175) gives riskScore 18"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/scoring.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "node test/fixtures/n.cjs docs/design-repo-vuln-report-mcp.md",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T012",
+      "title": "Severity from CVSS and by_worst rating",
+      "intent": "Add severityFromCvss (5.1) and by_worst to riskRating in src/scoring.ts. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has complete scoring.ts; finding identity/sort does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/severity.test.ts`. Revert (after its dependents) = undo src/scoring.ts, test/severity.test.ts.",
+      "depends_on": [
+        "T011"
+      ],
+      "design_refs": [
+        "5.1 Severity from CVSS",
+        "5.2 Risk score"
+      ],
+      "changes": [
+        {
+          "path": "src/scoring.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/severity.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/severity.test.ts, test \"T-02 CVSS boundary 8.9/9\": severityFromCvss(8.9)=high and severityFromCvss(9)=critical",
+        "test/severity.test.ts, test \"T-02 CVSS boundary 0.1/0\": severityFromCvss(0.1)=low and severityFromCvss(0)=info",
+        "test/severity.test.ts, test \"no CVSS score: label CRITICAL/HIGH/MODERATE/LOW\": no CVSS score: label CRITICAL/HIGH/MODERATE/LOW maps to critical/high/medium/low",
+        "test/severity.test.ts, test \"no CVSS score and no label\": no CVSS score and no label => severity medium with confidence lowered one step (high becomes medium)",
+        "test/severity.test.ts, test \"by_worst: critical/medium finding (raw10 175,\": by_worst: critical/medium finding (raw10 175, by_score medium) => riskRating high",
+        "test/severity.test.ts, test \"by_worst: critical finding with confidence low\": by_worst: critical finding with confidence low (raw10 100) => riskRating stays medium (by_worst none)"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/severity.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T013",
+      "title": "Secret entropy and generic high-entropy rule",
+      "intent": "Implement Shannon entropy and SEC-GENERIC-HIGH-ENTROPY (quoted value under key secret|token|password|api_key, SECRET_MIN_LEN/HEX_MIN_LEN, ENT_ALNUM_MILLI/ENT_HEX_MILLI) in src/scanners/secret.ts on RE2 (re2-wasm). Rollback/partial: after this task the tree has entropy and the generic rule in secret.ts; AWS/PEM/GitHub rules, skip logic, redaction do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/secrets-entropy.test.ts`. Revert (after its dependents) = undo src/scanners/secret.ts, test/secrets-entropy.test.ts.",
+      "depends_on": [
+        "T009",
+        "T012"
+      ],
+      "design_refs": [
+        "4.2 Secret scanner",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/scanners/secret.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/secrets-entropy.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/secrets-entropy.test.ts, test \"T-03 entropy above threshold\": assert.ok(shannonMilli(\"kJ8dP2xQ9vL4mZ7wR1tY6uN3bC5hG0aS\") > 4000) (shannonMilli(s) = Math.round(H*1000) of the Shannon entropy H in bits, exported from src/scanners/secret.ts)",
+        "test/secrets-entropy.test.ts, test \"T-03 hex uniform\": assert.strictEqual(shannonMilli(\"0123456789abcdef\".repeat(2)), 4000)",
+        "test/secrets-entropy.test.ts, test \"T-03 hex mixed\": assert.strictEqual(shannonMilli(\"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6\"), 3906)",
+        "test/secrets-entropy.test.ts, test \"T-03 repeated char\": assert.strictEqual(shannonMilli(\"a\".repeat(20)), 0)",
+        "test/secrets-entropy.test.ts, test \"generic rule fires\": scanning the line `token = \"<value>\"` for each of the three high-entropy values returns exactly 1 finding with ruleId SEC-GENERIC-HIGH-ENTROPY",
+        "test/secrets-entropy.test.ts, test \"generic rule silent\": scanning `token = \"aaaaaaaaaaaaaaaaaaaa\"` returns 0 findings"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/secrets-entropy.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T014",
+      "title": "Secret pattern rules (AWS, private key, GitHub token)",
+      "intent": "Add SEC-AWS-ACCESS-KEY-ID (AKIA|ASIA + 16 chars), SEC-PRIVATE-KEY, SEC-GITHUB-TOKEN as RE2 patterns in secret.ts. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has three fixed-pattern rules; placeholder skip, long-line windows do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/secrets-rules.test.ts`. Revert (after its dependents) = undo src/scanners/secret.ts, test/secrets-rules.test.ts.",
+      "depends_on": [
+        "T013"
+      ],
+      "design_refs": [
+        "4.2 Secret scanner",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/scanners/secret.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/secrets-rules.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/secrets-rules.test.ts, test \"SEC-AWS-ACCESS-KEY-ID matches AKIA followed by\": SEC-AWS-ACCESS-KEY-ID matches AKIA followed by 16 chars and not AKIA followed by 15 chars",
+        "test/secrets-rules.test.ts, test \"SEC-AWS-ACCESS-KEY-ID matches ASIA followed by\": SEC-AWS-ACCESS-KEY-ID matches ASIA followed by 16 chars",
+        "test/secrets-rules.test.ts, test \"SEC-PRIVATE-KEY matches a -----BEGIN RSA\": SEC-PRIVATE-KEY matches a \"-----BEGIN RSA PRIVATE KEY-----\" line",
+        "test/secrets-rules.test.ts, test \"SEC-PRIVATE-KEY does not match -----BEGIN\": SEC-PRIVATE-KEY does not match \"-----BEGIN PUBLIC KEY-----\"",
+        "test/secrets-rules.test.ts, test \"SEC-GITHUB-TOKEN matches a ghp_ token of 36\": SEC-GITHUB-TOKEN matches a ghp_ token of 36 chars and not a ghp_ value of 10 chars",
+        "test/secrets-rules.test.ts, test \"SEC-AWS-ACCESS-KEY-ID finding column is the\": SEC-AWS-ACCESS-KEY-ID finding column is the 1-based offset of the key start (key at offset 18 => column 19)"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/secrets-rules.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T015",
+      "title": "Secret placeholder skip, long-line windows and RE2-only patterns",
+      "intent": "Add placeholder/.env.example skip and SECRET_WINDOW_BYTES windowed scan of long lines to secret.ts. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has complete detection (detection only, no redaction); redact/normalize/assertNoSecrets do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/secrets-skip.test.ts`. Revert (after its dependents) = undo src/scanners/secret.ts, test/secrets-skip.test.ts.",
+      "depends_on": [
+        "T014"
+      ],
+      "design_refs": [
+        "4.2 Secret scanner",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/scanners/secret.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/secrets-skip.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/secrets-skip.test.ts, test \"a quoted value containing example or your_\": a quoted value containing \"example\" or \"your_\" produces 0 findings",
+        "test/secrets-skip.test.ts, test \"a ${X} placeholder value produces 0 findings\": a \"${X}\" placeholder value produces 0 findings",
+        "test/secrets-skip.test.ts, test \"a high-entropy token inside a file named\": a high-entropy token inside a file named .env.example produces 0 findings",
+        "test/secrets-skip.test.ts, test \"a 100000-char single line holding an AKIA key\": a 100000-char single line holding an AKIA key is scanned in SECRET_WINDOW_BYTES (4096) windows and the key is found",
+        "test/secrets-skip.test.ts, test \"secret patterns contain no lookaround or\": secret patterns contain no lookaround or backreference (all compile with re2-wasm)"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/secrets-skip.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T016",
+      "title": "Redaction and evidence normalization",
+      "intent": "Implement src/security/redact.ts: redact (REDACT_PREFIX, n<8 no prefix, PEM body never) and normalize (LEAK_SUBSTR substring check). G3 mechanism and section 11 documented false positive. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has redact.ts; assertNoSecrets and output wiring do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/redact.test.ts`. Revert (after its dependents) = undo src/security/redact.ts, test/redact.test.ts.",
+      "depends_on": [
+        "T015"
+      ],
+      "design_refs": [
+        "4.2 Secret scanner",
+        "11. Defense trade-offs",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/security/redact.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/redact.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/redact.test.ts, test \"redact of a 20-char value returns first 4 chars\": redact of a 20-char value returns first 4 chars + \"****[REDACTED len=20]\"",
+        "test/redact.test.ts, test \"redact of a 7-char value returns ****[REDACTED\": redact of a 7-char value returns \"****[REDACTED len=7]\" (no prefix)",
+        "test/redact.test.ts, test \"redact of an 8-char value keeps a 4-char prefix\": redact of an 8-char value keeps a 4-char prefix",
+        "test/redact.test.ts, test \"PEM body lines never appear in evidence; only\": PEM body lines never appear in evidence; only the redacted BEGIN line marker remains",
+        "test/redact.test.ts, test \"normalize turns evidence holding AKIA+16 chars\": T-28 (F-13): normalize turns evidence holding AKIA+16 chars into \"[REDACTED line]\"",
+        "test/redact.test.ts, test \"innocent text sharing a LEAK_SUBSTR (5) char\": T-28 (F-13): innocent text sharing a LEAK_SUBSTR (5) char substring with a secret is also blanked (documented false positive, test title cites section 11)"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/redact.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T017",
+      "title": "assertNoSecrets output guard",
+      "intent": "Implement src/security/assertNoSecrets.ts re-applying SEC-* patterns and the LEAK_SUBSTR check on any output string. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has assertNoSecrets.ts; any caller does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/assert-no-secrets.test.ts`. Revert (after its dependents) = undo src/security/assertNoSecrets.ts, test/assert-no-secrets.test.ts.",
+      "depends_on": [
+        "T016"
+      ],
+      "design_refs": [
+        "4.2 Secret scanner",
+        "7. Reports and security",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/security/assertNoSecrets.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/assert-no-secrets.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/assert-no-secrets.test.ts, test \"output holding a 5-char substring of a detected\": output holding a 5-char substring of a detected secret past REDACT_PREFIX makes assertNoSecrets throw E_INTERNAL",
+        "test/assert-no-secrets.test.ts, test \"output holding only the 4-char REDACT_PREFIX of\": output holding only the 4-char REDACT_PREFIX of the secret does not throw",
+        "test/assert-no-secrets.test.ts, test \"output holding AKIA+16 chars throws E_INTERNAL\": output holding AKIA+16 chars throws E_INTERNAL even when the secret was not registered",
+        "test/assert-no-secrets.test.ts, test \"clean output (no secret substring) does not\": clean output (no secret substring) does not throw"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/assert-no-secrets.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T018",
+      "title": "Repo path string validation",
+      "intent": "Implement validateRepoPath string-level checks in src/security/paths.ts (before any filesystem access). Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has string-level validator, no fs access; realpath/opendir checks do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/path-strings.test.ts`. Revert (after its dependents) = undo src/security/paths.ts, test/path-strings.test.ts.",
+      "depends_on": [
+        "T017"
+      ],
+      "design_refs": [
+        "3.1 Error codes",
+        "7. Reports and security",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/security/paths.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/path-strings.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/path-strings.test.ts, test \"<root>/../x\": T-10 (F-16): <root>/../x => E_PATH_TRAVERSAL",
+        "test/path-strings.test.ts, test \"./repo (relative)\": T-10 (F-16): ./repo (relative) => E_INVALID_INPUT",
+        "test/path-strings.test.ts, test \"a path containing a NUL char\": T-10 (F-16): a path containing a NUL char => E_INVALID_INPUT",
+        "test/path-strings.test.ts, test \"reserved segments CON and COM1 in any path\": T-10 (F-16): reserved segments CON and COM1 in any path segment (also <root>/con/x) => E_INVALID_INPUT",
+        "test/path-strings.test.ts, test \"path outside VULN_MCP_ALLOWED_ROOTS\": path outside VULN_MCP_ALLOWED_ROOTS => E_PATH_TRAVERSAL",
+        "test/path-strings.test.ts, test \"path of PATH_MAX+1 (4097) chars\": path of PATH_MAX+1 (4097) chars => E_INVALID_INPUT"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/path-strings.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T019",
+      "title": "Repo path filesystem validation",
+      "intent": "Extend validateRepoPath with realpath, allowed-root recheck, directory check and opendir mapping. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has complete validateRepoPath; output dir validation does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/path-security.test.ts`. Revert (after its dependents) = undo src/security/paths.ts, test/path-security.test.ts.",
+      "depends_on": [
+        "T018"
+      ],
+      "design_refs": [
+        "3.1 Error codes",
+        "7. Reports and security",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/security/paths.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/path-security.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/path-security.test.ts, test \"missing path\": missing path => E_NOT_FOUND",
+        "test/path-security.test.ts, test \"path that is a regular file (not a directory)\": path that is a regular file (not a directory) => E_NOT_FOUND (3.1 lists \"not a dir\" under E_NOT_FOUND)",
+        "test/path-security.test.ts, test \"a symlink inside the root pointing outside the\": a symlink inside the root pointing outside the allowed roots => E_PATH_TRAVERSAL (judged by realpath)",
+        "test/path-security.test.ts, test \"unreadable repoPath\": T-23 (F-07b): unreadable repoPath => E_PERMISSION_DENIED",
+        "test/path-security.test.ts, test \"no read or write occurs after\": T-23 (F-07b): no read or write occurs after E_PERMISSION_DENIED (fs spy call count 0)",
+        "test/path-security.test.ts, test \"validation performs no filesystem mutation\": validation performs no filesystem mutation (tree hash identical before and after)"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/path-security.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T020",
+      "title": "Output directory safety checks",
+      "intent": "Implement validateOutputDir unsafe cases in src/security/paths.ts judged by realpath. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has unsafe-case validation; default/allow resolution does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/output-dir-unsafe.test.ts`. Revert (after its dependents) = undo src/security/paths.ts, test/output-dir-unsafe.test.ts.",
+      "depends_on": [
+        "T019"
+      ],
+      "design_refs": [
+        "7. Reports and security",
+        "3.1 Error codes",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/security/paths.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/output-dir-unsafe.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/output-dir-unsafe.test.ts, test \"outputDir inside the target\": T-10b (F-11): outputDir inside the target => E_OUTPUT_DIR_UNSAFE",
+        "test/output-dir-unsafe.test.ts, test \"outputDir that is an ancestor of the target\": T-10b (F-11): outputDir that is an ancestor of the target => E_OUTPUT_DIR_UNSAFE",
+        "test/output-dir-unsafe.test.ts, test \"outputDir that is a symlink into the target\": T-10b (F-11): outputDir that is a symlink into the target => E_OUTPUT_DIR_UNSAFE",
+        "test/output-dir-unsafe.test.ts, test \"outputDir under <repo>/.git/\": outputDir under <repo>/.git/ => E_OUTPUT_DIR_UNSAFE even with allowWriteInsideTarget=true",
+        "test/output-dir-unsafe.test.ts, test \"target tree hash is unchanged after all unsafe\": target tree hash is unchanged after all unsafe attempts"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/output-dir-unsafe.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T021",
+      "title": "Output directory resolution and permissions",
+      "intent": "Add outputDir resolution (default root/scanId, allowWriteInsideTarget) to paths.ts. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has complete validateOutputDir; writer does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/output-dir-resolve.test.ts`. Revert (after its dependents) = undo src/security/paths.ts, test/output-dir-resolve.test.ts.",
+      "depends_on": [
+        "T020"
+      ],
+      "design_refs": [
+        "7. Reports and security",
+        "3.1 Error codes",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/security/paths.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/output-dir-resolve.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/output-dir-resolve.test.ts, test \"no outputDir resolves to\": no outputDir resolves to VULN_MCP_OUTPUT_ROOT/<scanId>",
+        "test/output-dir-resolve.test.ts, test \"allowWriteInsideTarget=true without outputDir\": allowWriteInsideTarget=true without outputDir resolves to <repo>/.vuln-report/",
+        "test/output-dir-resolve.test.ts, test \"explicit outputDir inside the target is\": explicit outputDir inside the target is accepted when allowWriteInsideTarget=true",
+        "test/output-dir-resolve.test.ts, test \"outputDir outside the allowed roots\": outputDir outside the allowed roots => E_PATH_TRAVERSAL",
+        "test/output-dir-resolve.test.ts, test \"unreadable outputDir\": T-23 (F-07b): unreadable outputDir => E_PERMISSION_DENIED before any write"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/output-dir-resolve.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T022",
+      "title": "Finding identity and total sort",
+      "intent": "Implement fingerprint/occurrence/id/collision suffix (LF-joined, canonical evidence) in src/findings/identity.ts and total sort 5.3 in sort.ts. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has identity.ts and sort.ts; dedupe/truncation does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/findings-identity.test.ts`. Revert (after its dependents) = undo src/findings/identity.ts, src/findings/sort.ts, test/findings-identity.test.ts.",
+      "depends_on": [
+        "T012",
+        "T021"
+      ],
+      "design_refs": [
+        "5. Finding model (`d#/Fnd`, `location.path` relative)",
+        "5.3 Sort",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/findings/identity.ts",
+          "kind": "add"
+        },
+        {
+          "path": "src/findings/sort.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/findings-identity.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/findings-identity.test.ts, test \"F-17: 100 shuffled permutations of one finding\": F-17: 100 shuffled permutations of one finding list give byte-identical sorted JSON",
+        "test/findings-identity.test.ts, test \"T-12 part: CRLF and LF copies of the same\": T-12 part: CRLF and LF copies of the same evidence yield equal fingerprints",
+        "test/findings-identity.test.ts, test \"equal fpBase findings get occurrence 1,2\": equal fpBase findings get occurrence 1,2 ordered by (path,line,column)",
+        "test/findings-identity.test.ts, test \"colliding ids get suffix -1 then -2\": colliding ids get suffix -1 then -2",
+        "test/findings-identity.test.ts, test \"location.path keeps forward slashes (a\": location.path keeps forward slashes (a backslash path is converted)",
+        "test/findings-identity.test.ts, test \"an absolute location.path is rejected\": an absolute location.path is rejected"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/findings-identity.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T023",
+      "title": "Finding dedupe (merge steps 1-3)",
+      "intent": "Implement src/findings/dedupe.ts steps 1-3: merge by id, union-find merge by scanner+path+line+CWE intersection, online/offline merge. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has dedupe.ts; bounded top-K truncation does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/findings-dedupe.test.ts`. Revert (after its dependents) = undo src/findings/dedupe.ts, test/findings-dedupe.test.ts.",
+      "depends_on": [
+        "T022"
+      ],
+      "design_refs": [
+        "5.4 Dedupe and truncation",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/findings/dedupe.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/findings-dedupe.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/findings-dedupe.test.ts, test \"two findings with the same id merge into one\": two findings with the same id merge into one",
+        "test/findings-dedupe.test.ts, test \"same scanner+path+line with intersecting CWE\": same scanner+path+line with intersecting CWE sets merge, keeping the highest severity",
+        "test/findings-dedupe.test.ts, test \"the merged finding keeps the lowest ruleId and\": the merged finding keeps the lowest ruleId and lists the others in relatedRuleIds",
+        "test/findings-dedupe.test.ts, test \"same location with disjoint CWE sets are not\": same location with disjoint CWE sets are not merged",
+        "test/findings-dedupe.test.ts, test \"online and offline findings for the same\": online and offline findings for the same package merge into the offline one",
+        "test/findings-dedupe.test.ts, test \"dedupe result is identical for 100 shuffled\": dedupe result is identical for 100 shuffled input orders"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/findings-dedupe.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T024",
+      "title": "Bounded top-K truncation",
+      "intent": "Implement step 4 in src/findings/truncate.ts: keep top K by 5.3 order, truncated flag. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has truncate.ts; pipeline integration does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/findings-truncate.test.ts`. Revert (after its dependents) = undo src/findings/truncate.ts, test/findings-truncate.test.ts.",
+      "depends_on": [
+        "T023"
+      ],
+      "design_refs": [
+        "5.4 Dedupe and truncation",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/findings/truncate.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/findings-truncate.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/findings-truncate.test.ts, test \"T-06 unit (F-08): maxFindings=3 on a 10-finding\": T-06 unit (F-08): maxFindings=3 on a 10-finding list keeps the first 3 in 5.3 order",
+        "test/findings-truncate.test.ts, test \"truncated is true when findings were dropped\": truncated is true when findings were dropped",
+        "test/findings-truncate.test.ts, test \"truncated is false when the list has <= K\": truncated is false when the list has <= K findings",
+        "test/findings-truncate.test.ts, test \"a new finding replaces the current minimum only\": a new finding replaces the current minimum only when strictly higher in 5.3 order",
+        "test/findings-truncate.test.ts, test \"a finding equal in order to the minimum does\": a finding equal in order to the minimum does not replace it",
+        "test/findings-truncate.test.ts, test \"result is identical for shuffled input orders\": result is identical for shuffled input orders"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/findings-truncate.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T025",
+      "title": "Walker core: order, depth, skip lists, gitignore, abort",
+      "intent": "Implement DFS code-point-order walker in src/pipeline/walker.ts with src/pipeline/warnings.ts catalogue. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has walker core; symlink policy, globs validation, maxFiles do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/walker.test.ts`. Revert (after its dependents) = undo src/pipeline/walker.ts, src/pipeline/warnings.ts, test/walker.test.ts.",
+      "depends_on": [
+        "T019",
+        "T024"
+      ],
+      "design_refs": [
+        "4. Pipeline and scanners",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/pipeline/walker.ts",
+          "kind": "add"
+        },
+        {
+          "path": "src/pipeline/warnings.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/walker.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/walker.test.ts, test \"traversal order equals code-point order of paths\": traversal order equals code-point order of paths",
+        "test/walker.test.ts, test \"depth beyond MAX_DEPTH (64) stops descent and\": depth beyond MAX_DEPTH (64) stops descent and emits a warning",
+        "test/walker.test.ts, test \".git, node_modules and .vuln-report directories\": .git, node_modules and .vuln-report directories are skipped",
+        "test/walker.test.ts, test \"node_modules is walked when an includeGlobs\": node_modules is walked when an includeGlobs entry matches it",
+        "test/walker.test.ts, test \".gitignore matches are skipped when\": .gitignore matches are skipped when respectGitignore=true and walked when false",
+        "test/walker.test.ts, test \"aborting the signal stops the walk before the\": aborting the signal stops the walk before the next file"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/walker.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T026",
+      "title": "Walker symlink policy, globs and maxFiles",
+      "intent": "Add symlink policy, glob limits and maxFiles cap to walker.ts. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has complete walker; reader does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/walker-policy.test.ts`. Revert (after its dependents) = undo src/pipeline/walker.ts, test/walker-policy.test.ts.",
+      "depends_on": [
+        "T025"
+      ],
+      "design_refs": [
+        "4. Pipeline and scanners",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/pipeline/walker.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/walker-policy.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/walker-policy.test.ts, test \"symlink loop a->. terminates and emits\": T-09 (F-03): symlink loop a->. terminates and emits W_SYMLINK_SKIPPED (no hang)",
+        "test/walker-policy.test.ts, test \"follow-within-root with a link to a dir holding\": T-09 (F-03): follow-within-root with a link to a dir holding an AKIA key outside root emits W_SYMLINK_ESCAPE and no outside content is read",
+        "test/walker-policy.test.ts, test \"excludeGlobs entries exclude matching files\": excludeGlobs entries exclude matching files",
+        "test/walker-policy.test.ts, test \"51 globs (more than GLOB_N)\": 51 globs (more than GLOB_N) => E_INVALID_INPUT",
+        "test/walker-policy.test.ts, test \"a glob of 257 chars (more than GLOB_LEN)\": a glob of 257 chars (more than GLOB_LEN) => E_INVALID_INPUT",
+        "test/walker-policy.test.ts, test \"maxFiles=2 on a 5-file tree\": maxFiles=2 on a 5-file tree => truncated true and a W_* warning"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/walker-policy.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T027",
+      "title": "Reader: TOCTOU, vanish, binary and size",
+      "intent": "Implement src/pipeline/reader.ts: fstat-vs-lstat recheck, ENOENT, NUL probe (BINARY_PROBE_BYTES), maxFileBytes. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has reader.ts basic safeguards; encoding, minified, EACCES and abort-inside-file do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/reader.test.ts`. Revert (after its dependents) = undo src/pipeline/reader.ts, src/pipeline/warnings.ts, test/reader.test.ts.",
+      "depends_on": [
+        "T026"
+      ],
+      "design_refs": [
+        "4. Pipeline and scanners",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/pipeline/reader.ts",
+          "kind": "add"
+        },
+        {
+          "path": "src/pipeline/warnings.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/reader.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/reader.test.ts, test \"file swapped for a symlink after listing\": T-16 (F-04): file swapped for a symlink after listing => W_FILE_CHANGED, file dropped, AKIA key absent from findings",
+        "test/reader.test.ts, test \"deleted src/b.js\": T-18 (F-07): deleted src/b.js => W_FILE_VANISHED count 1 and the 3 other files are read",
+        "test/reader.test.ts, test \"NUL at byte 10\": T-19 (F-02): NUL at byte 10 => W_BINARY_SKIPPED count 1 and no content returned",
+        "test/reader.test.ts, test \"file of maxFileBytes+1 bytes\": T-21 (F-01): file of maxFileBytes+1 bytes => W_FILE_TOO_LARGE count 1 and key unread",
+        "test/reader.test.ts, test \"file of exactly maxFileBytes bytes is read\": T-21 (F-01): file of exactly maxFileBytes bytes is read"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/reader.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T028",
+      "title": "Reader: encoding, minified, permission and abort",
+      "intent": "Extend reader.ts with latin1 fallback, LINE_MAX flag, EACCES warning, ABORT_CHECK_LINES. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has complete reader; rule engine does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/reader-encoding.test.ts`. Revert (after its dependents) = undo src/pipeline/reader.ts, test/reader-encoding.test.ts.",
+      "depends_on": [
+        "T027"
+      ],
+      "design_refs": [
+        "4. Pipeline and scanners",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/pipeline/reader.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/reader-encoding.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/reader-encoding.test.ts, test \"file with byte 0xE9\": T-31 (F-02a): file with byte 0xE9 => W_NON_UTF8 count 1 and content decoded as latin1",
+        "test/reader-encoding.test.ts, test \"line of LINE_MAX+1 (5001) chars\": T-32 (F-02b): line of LINE_MAX+1 (5001) chars => W_MINIFIED_SKIPPED count 1",
+        "test/reader-encoding.test.ts, test \"T-23 (F-07a) part: unreadable inner file\": T-23 (F-07a) part: unreadable inner file => W_PERMISSION_DENIED count 1",
+        "test/reader-encoding.test.ts, test \"T-23 (F-07a) part: siblings of the unreadable\": T-23 (F-07a) part: siblings of the unreadable file are still read",
+        "test/reader-encoding.test.ts, test \"abort inside a file stops after at most\": abort inside a file stops after at most ABORT_CHECK_LINES (1000) lines",
+        "test/reader-encoding.test.ts, test \"signal already aborted before open\": signal already aborted before open => file is not read"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/reader-encoding.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T029",
+      "title": "Rule loader and startup self-test",
+      "intent": "Implement zod-strict JSON rule loader in src/scanners/rules.ts with RE2 patterns and startup self-test; seed rules/rules.json. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has loader and seed rule file; ruleset hash and real rules do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/rules-loader.test.ts`. Revert (after its dependents) = undo src/scanners/rules.ts, rules/rules.json, test/rules-loader.test.ts.",
+      "depends_on": [
+        "T028"
+      ],
+      "design_refs": [
+        "4.3 Static / config rules",
+        "11. Defense trade-offs",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/scanners/rules.ts",
+          "kind": "add"
+        },
+        {
+          "path": "rules/rules.json",
+          "kind": "add"
+        },
+        {
+          "path": "test/rules-loader.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/rules-loader.test.ts, test \"rule whose shouldMatch sample does not match\": T-27 (F-14a): rule whose shouldMatch sample does not match => loader throws E_RULE_INVALID",
+        "test/rules-loader.test.ts, test \"rule whose shouldNotMatch sample matches\": rule whose shouldNotMatch sample matches => E_RULE_INVALID",
+        "test/rules-loader.test.ts, test \"section 11 RE2-only row: lookaround pattern is\": section 11 RE2-only row: lookaround pattern is rejected with E_RULE_INVALID",
+        "test/rules-loader.test.ts, test \"section 11 RE2-only row: backreference pattern\": section 11 RE2-only row: backreference pattern is rejected with E_RULE_INVALID",
+        "test/rules-loader.test.ts, test \"unknown key in a rule is rejected (zod strict)\": unknown key in a rule is rejected (zod strict)",
+        "test/rules-loader.test.ts, test \"rule id longer than RULEID_MAX (64) is rejected\": rule id longer than RULEID_MAX (64) is rejected"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/rules-loader.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T030",
+      "title": "Ruleset hash",
+      "intent": "Implement rulesetHash in src/scanners/rulesetHash.ts (SHA-256 of rules sorted by id + scanner versions). Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has rulesetHash.ts; scanners using it does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/ruleset-hash.test.ts`. Revert (after its dependents) = undo src/scanners/rulesetHash.ts, test/ruleset-hash.test.ts.",
+      "depends_on": [
+        "T029"
+      ],
+      "design_refs": [
+        "4.3 Static / config rules",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/scanners/rulesetHash.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/ruleset-hash.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/ruleset-hash.test.ts, test \"rulesetHash is 64 lowercase hex chars\": rulesetHash is 64 lowercase hex chars",
+        "test/ruleset-hash.test.ts, test \"rulesetHash is identical for two different rule\": rulesetHash is identical for two different rule file orders",
+        "test/ruleset-hash.test.ts, test \"rulesetHash changes when one rule pattern\": rulesetHash changes when one rule pattern changes",
+        "test/ruleset-hash.test.ts, test \"rulesetHash changes when a scanner version\": rulesetHash changes when a scanner version changes"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/ruleset-hash.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T031",
+      "title": "Static scanner engine with time budget",
+      "intent": "Implement src/scanners/static.ts running JSON rules with PER_FILE_BUDGET_MS budget and minified-line skip. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has static.ts engine; the real STA rules and config scanner do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/static-engine.test.ts`. Revert (after its dependents) = undo src/scanners/static.ts, test/static-engine.test.ts.",
+      "depends_on": [
+        "T015",
+        "T030"
+      ],
+      "design_refs": [
+        "4.3 Static / config rules",
+        "11. Defense trade-offs",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/scanners/static.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/static-engine.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/static-engine.test.ts, test \"rule (a+)+$ on a 100000-char a line followed by\": T-24 (F-10): rule (a+)+$ on a 100000-char \"a\" line followed by \"!\" completes without hang (RE2 linear)",
+        "test/static-engine.test.ts, test \"fake clock past PER_FILE_BUDGET_MS\": T-24 (F-10): fake clock past PER_FILE_BUDGET_MS => W_RULE_TIMEBUDGET count 1 and the scan completes",
+        "test/static-engine.test.ts, test \"section 11 LINE_MAX row: a line of 5001 chars\": section 11 LINE_MAX row: a line of 5001 chars is skipped with W_MINIFIED_SKIPPED count 1",
+        "test/static-engine.test.ts, test \"a rule restricted to languages [javascript]\": a rule restricted to languages [\"javascript\"] does not run on a .py file"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/static-engine.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T032",
+      "title": "Static JS rules and CORS config rule",
+      "intent": "Add JSON rules STA-JS-EVAL-001, STA-CMDI-001, STA-SQLI-001, STA-CRYPTO-001, STA-PATH-001, CFG-CORS-WILDCARD-001 to rules/rules.json. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has 6 JS/CORS rules (loader self-test passes); python/GitHub-Actions rules do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/static-rules-js.test.ts`. Revert (after its dependents) = undo rules/rules.json, test/static-rules-js.test.ts.",
+      "depends_on": [
+        "T029",
+        "T031"
+      ],
+      "design_refs": [
+        "4.3 Static / config rules",
+        "10. Fixtures and acceptance tests"
+      ],
+      "changes": [
+        {
+          "path": "rules/rules.json",
+          "kind": "modify"
+        },
+        {
+          "path": "test/static-rules-js.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/static-rules-js.test.ts, test \"STA-JS-EVAL-001 matches its shouldMatch sample\": STA-JS-EVAL-001 matches its shouldMatch sample and not its shouldNotMatch sample",
+        "test/static-rules-js.test.ts, test \"STA-CMDI-001 matches its shouldMatch sample and\": STA-CMDI-001 matches its shouldMatch sample and not its shouldNotMatch sample",
+        "test/static-rules-js.test.ts, test \"STA-SQLI-001 matches its shouldMatch sample and\": STA-SQLI-001 matches its shouldMatch sample and not its shouldNotMatch sample",
+        "test/static-rules-js.test.ts, test \"STA-CRYPTO-001 matches its shouldMatch sample\": STA-CRYPTO-001 matches its shouldMatch sample and not its shouldNotMatch sample",
+        "test/static-rules-js.test.ts, test \"STA-PATH-001 matches its shouldMatch sample and\": STA-PATH-001 matches its shouldMatch sample and not its shouldNotMatch sample",
+        "test/static-rules-js.test.ts, test \"CFG-CORS-WILDCARD-001 matches its shouldMatch\": CFG-CORS-WILDCARD-001 matches its shouldMatch sample and not its shouldNotMatch sample"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/static-rules-js.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T033",
+      "title": "Static Python and GitHub Actions rules",
+      "intent": "Add JSON rules STA-DESER-PY-001, STA-PY-CMDI-001, STA-DESER-PY-002, CFG-DEBUG-ENABLED-001, CFG-GHA-PULL-REQUEST-TARGET-001, CFG-GHA-SCRIPT-INJECTION-001. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has 12 JSON rules total; coded config rules do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/static-rules-py.test.ts`. Revert (after its dependents) = undo rules/rules.json, test/static-rules-py.test.ts.",
+      "depends_on": [
+        "T032"
+      ],
+      "design_refs": [
+        "4.3 Static / config rules",
+        "10. Fixtures and acceptance tests"
+      ],
+      "changes": [
+        {
+          "path": "rules/rules.json",
+          "kind": "modify"
+        },
+        {
+          "path": "test/static-rules-py.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/static-rules-py.test.ts, test \"STA-DESER-PY-001 matches its shouldMatch sample\": STA-DESER-PY-001 matches its shouldMatch sample and not its shouldNotMatch sample",
+        "test/static-rules-py.test.ts, test \"STA-PY-CMDI-001 matches its shouldMatch sample\": STA-PY-CMDI-001 matches its shouldMatch sample and not its shouldNotMatch sample",
+        "test/static-rules-py.test.ts, test \"STA-DESER-PY-002 matches its shouldMatch sample\": STA-DESER-PY-002 matches its shouldMatch sample and not its shouldNotMatch sample",
+        "test/static-rules-py.test.ts, test \"CFG-DEBUG-ENABLED-001 matches its shouldMatch\": CFG-DEBUG-ENABLED-001 matches its shouldMatch sample and not its shouldNotMatch sample",
+        "test/static-rules-py.test.ts, test \"CFG-GHA-PULL-REQUEST-TARGET-001 matches its\": CFG-GHA-PULL-REQUEST-TARGET-001 matches its shouldMatch sample and not its shouldNotMatch sample",
+        "test/static-rules-py.test.ts, test \"CFG-GHA-SCRIPT-INJECTION-001 matches its\": CFG-GHA-SCRIPT-INJECTION-001 matches its shouldMatch sample and not its shouldNotMatch sample"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/static-rules-py.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T034",
+      "title": "Coded config rules",
+      "intent": "Implement src/scanners/config.ts coded rules CFG-DOCKER-ROOT-001 and CFG-ENV-COMMITTED-001. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has config.ts; dependency scanner does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/config-coded.test.ts`. Revert (after its dependents) = undo src/scanners/config.ts, test/config-coded.test.ts.",
+      "depends_on": [
+        "T033"
+      ],
+      "design_refs": [
+        "4.3 Static / config rules",
+        "10. Fixtures and acceptance tests"
+      ],
+      "changes": [
+        {
+          "path": "src/scanners/config.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/config-coded.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/config-coded.test.ts, test \"CFG-DOCKER-ROOT-001 fires on a Dockerfile\": CFG-DOCKER-ROOT-001 fires on a Dockerfile without USER at line 1",
+        "test/config-coded.test.ts, test \"CFG-DOCKER-ROOT-001 does not fire on a\": CFG-DOCKER-ROOT-001 does not fire on a Dockerfile with USER nonroot",
+        "test/config-coded.test.ts, test \"CFG-ENV-COMMITTED-001 fires on a committed .env\": CFG-ENV-COMMITTED-001 fires on a committed .env at line 1 column 1",
+        "test/config-coded.test.ts, test \"CFG-ENV-COMMITTED-001 does not fire on\": CFG-ENV-COMMITTED-001 does not fire on .env.example"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/config-coded.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T035",
+      "title": "Lockfile parsers: npm, yarn, pnpm, poetry, Cargo",
+      "intent": "Implement src/scanners/lockfiles.ts for the five high-confidence formats with LOCKFILE_MAX_BYTES. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has five parsers; requirements, go.sum and pom parsers do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/lockfiles-core.test.ts`. Revert (after its dependents) = undo src/scanners/lockfiles.ts, test/lockfiles-core.test.ts.",
+      "depends_on": [
+        "T034"
+      ],
+      "design_refs": [
+        "4.1 Dependency scanner",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/scanners/lockfiles.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/lockfiles-core.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/lockfiles-core.test.ts, test \"package-lock.json yields name lodash, version\": package-lock.json yields name lodash, version 4.17.15, line 6",
+        "test/lockfiles-core.test.ts, test \"yarn.lock yields name, version and 1-based line\": yarn.lock yields name, version and 1-based line of the entry",
+        "test/lockfiles-core.test.ts, test \"pnpm-lock.yaml yields name, version and 1-based\": pnpm-lock.yaml yields name, version and 1-based line of the entry",
+        "test/lockfiles-core.test.ts, test \"poetry.lock yields name, version and 1-based\": poetry.lock yields name, version and 1-based line of the entry",
+        "test/lockfiles-core.test.ts, test \"Cargo.lock yields name, version and 1-based\": Cargo.lock yields name, version and 1-based line of the entry",
+        "test/lockfiles-core.test.ts, test \"package-lock.json cut after version:4.17.15\": T-17 (F-05): package-lock.json cut after \"version\":\"4.17.15\" => 0 packages, W_LOCKFILE_MALFORMED count 1, no E_INTERNAL"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/lockfiles-core.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T036",
+      "title": "Lockfile parsers: requirements, go.sum, pom.xml and warnings",
+      "intent": "Add the medium-confidence formats and missing/unpinned/too-large handling to lockfiles.ts. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has all 8 formats; advisory DB does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/lockfiles-extra.test.ts`. Revert (after its dependents) = undo src/scanners/lockfiles.ts, test/lockfiles-extra.test.ts.",
+      "depends_on": [
+        "T035"
+      ],
+      "design_refs": [
+        "4.1 Dependency scanner",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/scanners/lockfiles.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/lockfiles-extra.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/lockfiles-extra.test.ts, test \"requirements.txt name==1.2.3 pin yields name,\": requirements.txt \"name==1.2.3\" pin yields name, version and line",
+        "test/lockfiles-extra.test.ts, test \"requirements.txt requests>=2\": T-33 (F-05): requirements.txt \"requests>=2\" => W_UNPINNED_REQUIREMENT count 1 and 0 packages",
+        "test/lockfiles-extra.test.ts, test \"go.sum yields name, version and line\": go.sum yields name, version and line",
+        "test/lockfiles-extra.test.ts, test \"pom.xml literal dependency yields name, version\": pom.xml literal dependency yields name, version and line",
+        "test/lockfiles-extra.test.ts, test \"package.json-only repo\": T-33 (F-05): package.json-only repo => W_LOCKFILE_MISSING count 1",
+        "test/lockfiles-extra.test.ts, test \"lockfile larger than LOCKFILE_MAX_BYTES\": lockfile larger than LOCKFILE_MAX_BYTES (16777216) is skipped with a warning"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/lockfiles-extra.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T037",
+      "title": "Advisory DB shard loader",
+      "intent": "Implement src/advisory/db.ts: manifest, contentSha256 check, ageDays floor, STALE_DAYS, SHARD_LRU. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has db.ts; matching does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/advisory-db.test.ts`. Revert (after its dependents) = undo src/advisory/db.ts, test/advisory-db.test.ts.",
+      "depends_on": [
+        "T036"
+      ],
+      "design_refs": [
+        "4.1 Dependency scanner",
+        "2.2 Constants (options, limits, env)",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/advisory/db.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/advisory-db.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/advisory-db.test.ts, test \"DB generatedAt STALE_DAYS+1 days old\": T-20 (F-05b): DB generatedAt STALE_DAYS+1 days old => W_ADVISORY_DB_STALE count 1",
+        "test/advisory-db.test.ts, test \"T-03 stale boundary 30\": the DB load result for ageDays 30 (now 2026-10-01T23:59:59Z) has 0 W_ADVISORY_DB_STALE warnings",
+        "test/advisory-db.test.ts, test \"T-03 stale boundary 31\": the DB load result for ageDays 31 (now 2026-10-02T00:00:00Z) has exactly 1 W_ADVISORY_DB_STALE warning",
+        "test/advisory-db.test.ts, test \"T-34 (F-05c) part: shard with wrong\": T-34 (F-05c) part: shard with wrong contentSha256 => W_ADVISORY_DB_INVALID_SHARD count 1 and shard ignored",
+        "test \"ageDays floor\" in test/advisory-db.test.ts: ageDays(generatedAt, now) equals Math.floor((now-generatedAt)/86400000); with generatedAt 2026-09-01T00:00:00Z it returns 30 for now 2026-10-01T23:59:59Z and 31 for now 2026-10-02T00:00:00Z",
+        "test/advisory-db.test.ts, test \"loading more than SHARD_LRU (256) shards keeps\": loading more than SHARD_LRU (256) shards keeps at most 256 resident"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/advisory-db.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T038",
+      "title": "Dependency matching and findings",
+      "intent": "Implement src/scanners/dependency.ts: semver/PEP440/Maven comparison, DEP-OSV-ADVISORY finding with severity per 5.1 and remediation. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has offline dependency matching; perf test, online wiring do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/dependency.test.ts`. Revert (after its dependents) = undo src/scanners/dependency.ts, test/dependency.test.ts.",
+      "depends_on": [
+        "T006",
+        "T012",
+        "T023",
+        "T037"
+      ],
+      "design_refs": [
+        "4.1 Dependency scanner",
+        "9. Failure modes",
+        "11. Defense trade-offs"
+      ],
+      "changes": [
+        {
+          "path": "src/scanners/dependency.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/dependency.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/dependency.test.ts, test \"T-34 (F-05c) part: lockfile version abc vs\": T-34 (F-05c) part: lockfile version \"abc\" vs semver range => W_UNCOMPARABLE_VERSION count 1 and no finding",
+        "test/dependency.test.ts, test \"lodash 4.17.15 with CVSS 7.4 gives severity high\": lodash 4.17.15 with CVSS 7.4 gives severity high",
+        "test/dependency.test.ts, test \"the DEP-OSV-ADVISORY finding for lodash 4.17.15\": the DEP-OSV-ADVISORY finding for lodash 4.17.15 (item A1) has location.path \"package-lock.json\" and location.line 6",
+        "test/dependency.test.ts, test \"ruleId is DEP-OSV-ADVISORY and evidence equals\": ruleId is DEP-OSV-ADVISORY and evidence equals \"<eco>:<name>@<version>\"",
+        "test/dependency.test.ts, test \"remediation equals Upgrade lodash to >= <lowest\": remediation equals \"Upgrade lodash to >= <lowest fixed>\"",
+        "test/dependency.test.ts, test \"an advisory with no fixed version gives\": an advisory with no fixed version gives remediation \"No fixed version is known\""
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/dependency.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T039",
+      "title": "Dependency performance and online wiring",
+      "intent": "Add the Map-indexed location lookup perf guarantee and online-mode wiring to the OSV client. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has complete dependency scanner; ajv schemas and tools do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/dependency-perf.test.ts`. Revert (after its dependents) = undo src/scanners/dependency.ts, test/dependency-perf.test.ts.",
+      "depends_on": [
+        "T038"
+      ],
+      "design_refs": [
+        "4.1 Dependency scanner",
+        "9. Failure modes",
+        "11. Defense trade-offs"
+      ],
+      "changes": [
+        {
+          "path": "src/scanners/dependency.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/dependency-perf.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test \"T-07 (F-15) index linearity\" in test/dependency-perf.test.ts: wall time (performance.now) of building the location index for P=40,000 packages divided by that for P=10,000 is <= 4.5",
+        "test/dependency-perf.test.ts, test \"T-07 max-size lockfile time\": the full dependency scan of a lockfile with P=40,000 packages finishes in <= PERF_TARGET_S (20) seconds of wall time",
+        "test/dependency-perf.test.ts, test \"T-07 max-size lockfile memory\": process.memoryUsage().rss after the same scan, divided by 1048576, is <= PEAK_RSS_MIB (400)",
+        "test/dependency-perf.test.ts, test \"a package missing from the index gets line 1\": a package missing from the index gets line 1",
+        "test/dependency-perf.test.ts, test \"online=false: the OSV client is never\": online=false: the OSV client is never constructed (spy count 0)",
+        "test/dependency-perf.test.ts, test \"online=true with network allowed: the OSV\": online=true with network allowed: the OSV client (fake transport) is called once per unique package"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/dependency-perf.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T040",
+      "title": "Schemas and ajv wiring",
+      "intent": "Create schemas/defs.json ($id d) and schemas/tools.json (scan_repository, get_scan_status, cancel_scan, get_findings in/out) exactly as section 3, with src/contracts.ts ajv 8 wiring and x-limit resolved from LIMITS. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has 4 tool schemas + ajv wiring; generate_report/list_scanners schemas do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/contracts.test.ts`. Revert (after its dependents) = undo schemas/defs.json, schemas/tools.json, src/contracts.ts, test/contracts.test.ts.",
+      "depends_on": [
+        "T039"
+      ],
+      "design_refs": [
+        "3. MCP tool contracts",
+        "3.2 `scan_repository`",
+        "3.3 `get_scan_status` / `cancel_scan`",
+        "3.4 `get_findings`"
+      ],
+      "changes": [
+        {
+          "path": "schemas/defs.json",
+          "kind": "add"
+        },
+        {
+          "path": "schemas/tools.json",
+          "kind": "add"
+        },
+        {
+          "path": "src/contracts.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/contracts.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/contracts.test.ts, test \"schemas/defs.json compiles in ajv 8 with $id d\": T-15: schemas/defs.json compiles in ajv 8 with $id \"d\"",
+        "test/contracts.test.ts, test \"scan_repository input rejects unknown top-level\": scan_repository input rejects unknown top-level key \"foo\"",
+        "test/contracts.test.ts, test \"scan_repository input accepts\": scan_repository input accepts options.limits.maxFiles=500000 and rejects 500001 (x-limit max)",
+        "test/contracts.test.ts, test \"scan_repository input rejects\": scan_repository input rejects options.limits.maxFiles=0 (x-limit min 1)",
+        "test/contracts.test.ts, test \"get_scan_status and cancel_scan inputs accept\": get_scan_status and cancel_scan inputs accept scanId S-3f9a1c2b7d4e-1 and reject \"S-xyz\"",
+        "test/contracts.test.ts, test \"get_findings limit bounds\": ajv validation of get_findings input {scanId:\"S-3f9a1c2b7d4e-1\",limit:201} => invalid (error keyword \"maximum\"); limit 200 => valid"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/contracts.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T041",
+      "title": "Schema numbers equal 2.2 constants (T-15 diff)",
+      "intent": "Test-only task diffing schema numbers against constants. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has diff test; schemas for report tools do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/schema-constants.test.ts`. Revert (after its dependents) = undo test/schema-constants.test.ts.",
+      "depends_on": [
+        "T040"
+      ],
+      "design_refs": [
+        "3. MCP tool contracts",
+        "2.2 Constants (options, limits, env)"
+      ],
+      "changes": [
+        {
+          "path": "test/schema-constants.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/schema-constants.test.ts, test \"T-15 schema numbers equal 2.2 constants\" reads schemas/tools.json and schemas/defs.json with JSON.parse and asserts strictEqual(schema value, constant): get_findings cursor maxLength equals CURSOR_MAX (256)",
+        "test/schema-constants.test.ts, test \"T-15 schema numbers equal 2.2 constants\" reads schemas/tools.json and schemas/defs.json with JSON.parse and asserts strictEqual(schema value, constant): get_findings limit maximum equals GET_FINDINGS_MAX (200)",
+        "test/schema-constants.test.ts, test \"T-15 schema numbers equal 2.2 constants\" reads schemas/tools.json and schemas/defs.json with JSON.parse and asserts strictEqual(schema value, constant): pathPrefix maxLength equals PATHPREFIX_MAX (1024)",
+        "test/schema-constants.test.ts, test \"T-15 schema numbers equal 2.2 constants\" reads schemas/tools.json and schemas/defs.json with JSON.parse and asserts strictEqual(schema value, constant): repoPath and outputDir maxLength equal PATH_MAX (4096)",
+        "test/schema-constants.test.ts, test \"T-15 schema numbers equal 2.2 constants\" reads schemas/tools.json and schemas/defs.json with JSON.parse and asserts strictEqual(schema value, constant): Fnd.ruleId maxLength equals RULEID_MAX (64)",
+        "test/schema-constants.test.ts, test \"T-15 schema numbers equal 2.2 constants\" reads schemas/tools.json and schemas/defs.json with JSON.parse and asserts strictEqual(schema value, constant): Globs items maxLength equals GLOB_LEN (256) and maxItems equals GLOB_N (50)"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/schema-constants.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T042",
+      "title": "generate_report and list_scanners schemas",
+      "intent": "Append schemas for 3.5 and 3.6 to schemas/tools.json and src/contracts.ts. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has all 6 tool schemas; sanitizer and envelope do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/contracts-report.test.ts`. Revert (after its dependents) = undo schemas/tools.json, src/contracts.ts, test/contracts-report.test.ts.",
+      "depends_on": [
+        "T041"
+      ],
+      "design_refs": [
+        "3.5 `generate_report`",
+        "3.6 `list_scanners`"
+      ],
+      "changes": [
+        {
+          "path": "schemas/tools.json",
+          "kind": "modify"
+        },
+        {
+          "path": "src/contracts.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/contracts-report.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/contracts-report.test.ts, test \"generate_report input rejects formats []\": generate_report input rejects formats []",
+        "test/contracts-report.test.ts, test \"generate_report input rejects formats [pdf] and\": generate_report input rejects formats [\"pdf\"] and accepts [\"md\",\"json\",\"sarif\"]",
+        "test/contracts-report.test.ts, test \"generate_report input rejects an unknown key\": generate_report input rejects an unknown key",
+        "test/contracts-report.test.ts, test \"list_scanners input accepts {} and rejects {x:1}\": list_scanners input accepts {} and rejects {\"x\":1}",
+        "test/contracts-report.test.ts, test \"a sample list_scanners output validates\": a sample list_scanners output validates (required serverVersion, rulesetHash, scanners, advisoryDb, networkAllowed, limits)",
+        "test/contracts-report.test.ts, test \"a sample generate_report output validates\": a sample generate_report output validates (required scanId, outputDir, files, summary, partial)"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/contracts-report.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T043",
+      "title": "Sanitizer for untrusted text",
+      "intent": "Implement src/security/sanitize.ts: escape control/bidi/ANSI/<>&, cut to EVIDENCE_MAX. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has sanitize.ts; envelope does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/sanitize.test.ts`. Revert (after its dependents) = undo src/security/sanitize.ts, test/sanitize.test.ts.",
+      "depends_on": [
+        "T042"
+      ],
+      "design_refs": [
+        "7. Reports and security",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/security/sanitize.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/sanitize.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/sanitize.test.ts, test \"<b> is escaped to &lt;b&gt; and & to &amp;\": T-25 (F-12): \"<b>\" is escaped to \"&lt;b&gt;\" and \"&\" to \"&amp;\"",
+        "test/sanitize.test.ts, test \"U+202E is escaped (not present raw in output)\": T-25 (F-12): U+202E is escaped (not present raw in output)",
+        "test/sanitize.test.ts, test \"ESC[31m is escaped (no raw 0x1B in output)\": T-25 (F-12): ESC[31m is escaped (no raw 0x1B in output)",
+        "test/sanitize.test.ts, test \"input of EVIDENCE_MAX+50 (250) chars yields\": T-25 (F-12): input of EVIDENCE_MAX+50 (250) chars yields output length <= 200",
+        "test/sanitize.test.ts, test \"IGNORE PREVIOUS INSTRUCTIONS text is preserved\": T-25 (F-12): \"IGNORE PREVIOUS INSTRUCTIONS\" text is preserved as inert data",
+        "test \"T-15 evidence length\" in test/sanitize.test.ts: assert.strictEqual(defs.Fnd.properties.evidence.maxLength, EVIDENCE_MAX) where defs is JSON.parse of schemas/defs.json"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/sanitize.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T044",
+      "title": "Error envelope and untrusted-field helper",
+      "intent": "Implement src/envelope.ts (exports makeErrorEnvelope(code, message)): isError envelope, retryable table, NOTE prefix helper, untrusted list. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has envelope.ts; job manager does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/envelope.test.ts`. Revert (after its dependents) = undo src/envelope.ts, test/envelope.test.ts.",
+      "depends_on": [
+        "T043"
+      ],
+      "design_refs": [
+        "3.1 Error codes",
+        "3. MCP tool contracts",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/envelope.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/envelope.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/envelope.test.ts, test \"each of the 16 codes of 3.1 builds an envelope\": each of the 16 codes of 3.1 builds an envelope with isError=true and structuredContent.error.code equal to the code",
+        "test/envelope.test.ts, test \"retryable is true for E_TIMEOUT, E_CURSOR_STALE\": retryable is true for E_TIMEOUT, E_CURSOR_STALE and E_WRITE_FAILED",
+        "test/envelope.test.ts, test \"E_LIMIT_EXCEEDED is retryable true for queue\": E_LIMIT_EXCEEDED is retryable true for queue full and false for a strict-limits job error",
+        "test/envelope.test.ts, test \"E_SCAN_NOT_COMPLETE is retryable true for\": E_SCAN_NOT_COMPLETE is retryable true for queued/running and false for partial without allowPartial",
+        "test/envelope.test.ts, test \"envelope: E_INVALID_INPUT not retryable\": makeErrorEnvelope(\"E_INVALID_INPUT\", \"bad cursor\") returns isError true, structuredContent.error.code \"E_INVALID_INPUT\" and structuredContent.error.retryable === false",
+        "test/envelope.test.ts, test \"result content[0].text starts with NOTE: Fields\": T-25: result content[0].text starts with \"NOTE: Fields listed in \\\"untrusted\\\" contain repository-derived text\""
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/envelope.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T045",
+      "title": "Job manager: submit order, queue, requestKey",
+      "intent": "Extend the skeleton jobManager.ts in place (replacing its ad-hoc queued/running/completed flag by transition() from stateMachine.ts) with JobManager submit steps 1-7 in src/jobs/jobManager.ts and the new src/tools/scan.ts with a stub runner. The skeleton Worker start is kept as is: for every admitted job JobManager still starts the stub Worker and stores its posted message as job.stubResult; the worker \"done\" message now drives transition(job,\"done\") instead of setting the old flag. So job.stubResult stays available through T045 and T046 (the stub worker body is replaced only in T047) and the skeleton-stub tests stay green until T047 removes them. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has submit pipeline with stub runner; DB check, eviction, status tool do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/jobs-submit.test.ts` and the unchanged `node --import tsx --test test/skeleton-e2e.test.ts` (skeleton: and skeleton-stub: tests) exit 0. Revert (after its dependents) = undo src/jobs/jobManager.ts, src/tools/scan.ts, test/jobs-submit.test.ts.",
+      "depends_on": [
+        "T003",
+        "T005",
+        "T021",
+        "T030",
+        "T044"
+      ],
+      "design_refs": [
+        "3.2 `scan_repository`",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/jobs/jobManager.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "src/tools/scan.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/jobs-submit.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/jobs-submit.test.ts, test \"T-05 reuse\": with 2 running + 8 queued jobs, an identical request returns reused:true; test \"T-05 queue full\": with the same 2 running + 8 queued jobs, a new (different) request => E_LIMIT_EXCEEDED",
+        "test/jobs-submit.test.ts, test \"T-05 (F-08a) force\": with 2 running + 8 queued jobs, an identical request with force=true => E_LIMIT_EXCEEDED (reuse check precedes capacity; nothing is queued)",
+        "test/jobs-submit.test.ts, test \"T-11 (F-14) network flag\": scan_repository with options.online=true while VULN_MCP_ALLOW_NETWORK is unset => E_NETWORK_DISABLED, fake transport call count 0",
+        "test/jobs-submit.test.ts, test \"terminal jobs are never reused (same request\": terminal jobs are never reused (same request gets a new scanId)",
+        "test/jobs-submit.test.ts, test \"identical inputs give identical 64-hex\": identical inputs give identical 64-hex requestKey and scanId S-<requestKey[0:12]>-<counter>",
+        "test/skeleton-e2e.test.ts is not modified by this task and all its tests, including the skeleton-stub: ones that read job.stubResult, still pass (verify[2] runs that file)"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/jobs-submit.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "node --import tsx --test test/skeleton-e2e.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T046",
+      "title": "Job manager: DB check, status and eviction",
+      "intent": "Add DB check (step 4), get_scan_status handler, JOB_KEEP eviction, generation counter. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has complete submit + status; real scan execution does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/jobs-db-evict.test.ts` and the unchanged `node --import tsx --test test/skeleton-e2e.test.ts` exit 0 (job.stubResult is still produced by the stub worker exactly as in T045; real execution replaces it only in T047). Revert (after its dependents) = undo src/jobs/jobManager.ts, src/tools/status.ts, test/jobs-db-evict.test.ts.",
+      "depends_on": [
+        "T037",
+        "T044",
+        "T045"
+      ],
+      "design_refs": [
+        "3.2 `scan_repository`",
+        "3.3 `get_scan_status` / `cancel_scan`",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/jobs/jobManager.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "src/tools/status.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/jobs-db-evict.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/jobs-db-evict.test.ts, test \"no DB and scanners omitted\": T-22 (F-06): no DB and scanners omitted => submit warnings hold W_ADVISORY_DB_MISSING count 1",
+        "test/jobs-db-evict.test.ts, test \"scanners=[dependency] with no DB\": T-22 (F-06a): scanners=[\"dependency\"] with no DB => E_ADVISORY_DB_MISSING",
+        "test/jobs-db-evict.test.ts, test \"broken manifest.json\": T-22 (F-06a): broken manifest.json => E_ADVISORY_DB_INVALID",
+        "test/jobs-db-evict.test.ts, test \"unknown scanId S-000000000000-1\": T-29 (F-19): unknown scanId S-000000000000-1 => E_NOT_FOUND with retryable false",
+        "test/jobs-db-evict.test.ts, test \"the oldest scanId after JOB_KEEP+1 (21)\": T-29 (F-19): the oldest scanId after JOB_KEEP+1 (21) finished scans => E_NOT_FOUND with retryable false",
+        "test/jobs-db-evict.test.ts, test \"generation starts at 0 and increases by 1 per\": generation starts at 0 and increases by 1 per findings commit"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/jobs-db-evict.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "node --import tsx --test test/skeleton-e2e.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T047",
+      "title": "Scan execution: worker and scanner wiring",
+      "intent": "Replace the body of the skeleton stub worker src/jobs/worker.ts (and its fake OSV transport, now src/net/osvClient.ts) with an implementation executing walker/reader + 4 scanners + dedupe/sort/truncate with progress and caps. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has in-process execution (no MCP transport); cancel/timeout integration does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/jobs-run.test.ts`. Revert (after its dependents) = undo src/jobs/worker.ts, src/jobs/jobManager.ts, src/tools/scan.ts, test/jobs-run.test.ts. From this task the stub worker no longer posts a stub result, so job.stubResult does not exist. The stub-only tests titled `skeleton-stub:` in test/skeleton-e2e.test.ts are removed here; its contract tests (tools/list, scan then poll, stdin close) stay and must pass against the real worker.",
+      "depends_on": [
+        "T016",
+        "T017",
+        "T024",
+        "T026",
+        "T028",
+        "T032",
+        "T033",
+        "T034",
+        "T036",
+        "T039",
+        "T046"
+      ],
+      "design_refs": [
+        "3.2 `scan_repository`",
+        "4. Pipeline and scanners",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/jobs/worker.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "src/jobs/jobManager.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "src/tools/scan.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/jobs-run.test.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/skeleton-e2e.test.ts",
+          "kind": "modify"
+        }
+      ],
+      "acceptance": [
+        "test/jobs-run.test.ts, test \"a scan of the no-exec fixture spawns 0 child\": T-11 (F-14): a scan of the no-exec fixture spawns 0 child processes and a default scan performs 0 network calls (both spied; test titles start with T-11)",
+        "test/jobs-run.test.ts, test \"T-06 (F-08) integration: maxFindings=3,\": T-06 (F-08) integration: maxFindings=3, strictLimits false => completed, truncated true, 3 findings",
+        "test/jobs-run.test.ts, test \"T-06 (F-08) integration: maxFindings=3,\": T-06 (F-08) integration: maxFindings=3, strictLimits true => failed with error E_LIMIT_EXCEEDED",
+        "test/jobs-run.test.ts, test \"a mixed repo yields findings from all four\": a mixed repo yields findings from all four scanners (byScanner has dependency, secret, static, config each >= 1)",
+        "test/jobs-run.test.ts, test \"progress filesScanned never decreases across\": progress filesScanned never decreases across polls",
+        "test/skeleton-e2e.test.ts contains no test title starting `skeleton-stub:` and its remaining contract tests pass against the real worker"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/jobs-run.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 3
+    },
+    {
+      "id": "T048",
+      "title": "Cancel/timeout integration with real worker",
+      "intent": "Wire cancelController into jobManager/worker; implement cancel_scan and waitMs. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has cancel/timeout wired to the real worker; get_findings do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/jobs-cancel.test.ts` (controller semantics already proven with fake clock). Revert (after its dependents) = undo src/jobs/jobManager.ts, src/jobs/worker.ts, src/tools/status.ts, test/jobs-cancel.test.ts.",
+      "depends_on": [
+        "T004",
+        "T005",
+        "T047"
+      ],
+      "design_refs": [
+        "3.3 `get_scan_status` / `cancel_scan`",
+        "6. Job state machine",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/jobs/jobManager.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "src/jobs/worker.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "src/tools/status.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/jobs-cancel.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/jobs-cancel.test.ts, test \"real timeoutMs=1000 on a large tree\": T-08 (F-09): real timeoutMs=1000 on a large tree => state timed_out, complete false, durationMs <= 1000+CANCEL_DRAIN_MS (4000)",
+        "test/jobs-cancel.test.ts, test \"cancel_scan on a running job (real worker,\": T-08 (F-09a): cancel_scan on a running job (real worker, large tree) returns cancelRequested true, and the job reaches state cancelled with error E_CANCELLED within CANCEL_DRAIN_MS (3000)",
+        "test/jobs-cancel.test.ts, test \"cancel_scan on a terminal job is a no-op\": cancel_scan on a terminal job is a no-op answered before transition",
+        "test/jobs-cancel.test.ts, test \"cancel_scan on a queued job returns state\": cancel_scan on a queued job returns state cancelled immediately",
+        "test/jobs-cancel.test.ts, test \"abort propagates: the worker observes\": abort propagates: the worker observes signal.aborted after cancel",
+        "test/jobs-cancel.test.ts, test \"waitMs=0 returns a non-terminal state without\": waitMs=0 returns a non-terminal state without blocking"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/jobs-cancel.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T049",
+      "title": "get_findings cursor and generations",
+      "intent": "Implement src/tools/cursor.ts and src/tools/getFindings.ts: base64url scanId:generation:offset with strict validation. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has cursor handling; filters and totals do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/get-findings-cursor.test.ts`. Revert (after its dependents) = undo src/tools/getFindings.ts, src/tools/cursor.ts, test/get-findings-cursor.test.ts.",
+      "depends_on": [
+        "T022",
+        "T040",
+        "T048"
+      ],
+      "design_refs": [
+        "3.4 `get_findings`",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/tools/getFindings.ts",
+          "kind": "add"
+        },
+        {
+          "path": "src/tools/cursor.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/get-findings-cursor.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/get-findings-cursor.test.ts, test \"cursor Uy0zZjlhMWMyYjdkNGUtMTozOjUw at\": T-04: cursor Uy0zZjlhMWMyYjdkNGUtMTozOjUw at generation 3 returns findings 50..99",
+        "test/get-findings-cursor.test.ts, test \"cursor Uy0zZjlhMWMyYjdkNGUtMTozOjUw (generation\": T-04 (F-08b): cursor Uy0zZjlhMWMyYjdkNGUtMTozOjUw (generation 3) sent after a findings commit raised the scan generation to 4 => E_CURSOR_STALE with retryable true",
+        "test/get-findings-cursor.test.ts, test \"get_findings with no cursor (limit 50) at\": T-04: get_findings with no cursor (limit 50) at generation 4 returns isError false and a nextCursor equal to base64url(\"S-3f9a1c2b7d4e-1:4:50\") = \"Uy0zZjlhMWMyYjdkNGUtMTo0OjUw\"; sending that cursor returns findings 50..99 with no error",
+        "test/get-findings-cursor.test.ts, test \"cursor that is not base64url\": cursor that is not base64url => E_INVALID_INPUT",
+        "test/get-findings-cursor.test.ts, test \"cursor that does not have 3 parts\": cursor that does not have 3 parts => E_INVALID_INPUT",
+        "test/get-findings-cursor.test.ts, test \"cursor for another scanId\": cursor for another scanId => E_INVALID_INPUT"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/get-findings-cursor.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T050",
+      "title": "get_findings filters, totals and completeness",
+      "intent": "Add filters, total, complete and limit range to getFindings.ts. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has complete get_findings; writer does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/get-findings-filter.test.ts`. Revert (after its dependents) = undo src/tools/getFindings.ts, test/get-findings-filter.test.ts.",
+      "depends_on": [
+        "T049"
+      ],
+      "design_refs": [
+        "3.4 `get_findings`",
+        "9. Failure modes",
+        "11. Defense trade-offs"
+      ],
+      "changes": [
+        {
+          "path": "src/tools/getFindings.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/get-findings-filter.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/get-findings-filter.test.ts, test \"limit 201\": limit 201 => E_INVALID_INPUT (no clamp); limit 200 => isError false and findings.length <= 200",
+        "test/get-findings-filter.test.ts, test \"unknown scanId\": unknown scanId => E_NOT_FOUND",
+        "test/get-findings-filter.test.ts, test \"filter keys combine as AND (minSeverity +\": filter keys combine as AND (minSeverity + scanners)",
+        "test/get-findings-filter.test.ts, test \"values within one filter list combine as OR\": values within one filter list combine as OR (ruleIds)",
+        "test/get-findings-filter.test.ts, test \"total equals the count after filtering\": total equals the count after filtering",
+        "test/get-findings-filter.test.ts, test \"complete is false in non-completed states and\": complete is false in non-completed states and true in completed"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/get-findings-filter.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T051",
+      "title": "Atomic report writer",
+      "intent": "Implement src/report/writer.ts: the only module that writes (wx tmp, fsync, rename). Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has writer.ts; renderers do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/writer.test.ts`, eslint and the write-confinement grep with its fixture proof (temp tree: violating file outside report is detected, the same text under report is exempt). Revert (after its dependents) = undo src/report/writer.ts, test/writer.test.ts.",
+      "depends_on": [
+        "T021",
+        "T050"
+      ],
+      "design_refs": [
+        "7. Reports and security",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/report/writer.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/writer.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/writer.test.ts, test \"stub rename failing EIO on the 2nd of 3 files\": T-26: stub rename failing EIO on the 2nd of 3 files => E_WRITE_FAILED with retryable true",
+        "test/writer.test.ts, test \"after the failure the *.tmp count is 0 and the\": T-26: after the failure the *.tmp count is 0 and the error message names the failed file",
+        "test/writer.test.ts, test \"F-11a: the first (already renamed) file stays\": F-11a: the first (already renamed) file stays in place (partial set)",
+        "test/writer.test.ts, test \"an existing target file keeps its old content\": an existing target file keeps its old content when its rename fails",
+        "test/writer.test.ts, test \"tmp files are opened with flag wx: when the tmp\": tmp files are opened with flag wx: when the tmp name already exists the open fails with EEXIST and the pre-existing file's SHA-256 is unchanged",
+        "verify[3] write-confinement grep over src (excluding src/report) has expect_exit_code 1 (no match; status 2 fails); verify[4] proves on a temp tree that the pattern exits 0 on writeFile/unlink/rename/createWriteStream snippets outside report, 1 on read-only code, and ignores a violating file under a report directory"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/writer.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx eslint src",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "grep -rEn \"writeFile|appendFile|createWriteStream|renameSync|fs\\.rename|unlink\" src --exclude-dir=report",
+          "expect_exit_code": 1
+        },
+        {
+          "command": "d=$(mktemp -d); rc=0; mkdir -p \"$d/src/report\" || rc=1; for s in 'fs.writeFileSync(p, d);' 'fs.promises.unlink(p);' 'fs.renameSync(a, b);' 'fs.createWriteStream(p);'; do printf '%s\n' \"$s\" > \"$d/src/p.ts\"; grep -rEn \"writeFile|appendFile|createWriteStream|renameSync|fs\\.rename|unlink\" \"$d/src\" --exclude-dir=report >/dev/null || rc=1; done; printf '%s\n' 'fs.writeFileSync(p, d);' > \"$d/src/report/ok.ts\"; printf '%s\n' 'const x = fs.readFileSync(p); fs.statSync(p);' > \"$d/src/p.ts\"; grep -rEn \"writeFile|appendFile|createWriteStream|renameSync|fs\\.rename|unlink\" \"$d/src\" --exclude-dir=report >/dev/null; [ $? -eq 1 ] || rc=1; rm -rf \"$d\"; [ $rc -eq 0 ]",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "grep -rq \"export\" src/report/writer.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T052",
+      "title": "Report JSON and Markdown rendering",
+      "intent": "Implement src/report/render.ts: report.json per section 7 schema and report.md. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has render.ts; SARIF and tool do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/report-render.test.ts`. Revert (after its dependents) = undo src/report/render.ts, test/report-render.test.ts.",
+      "depends_on": [
+        "T042",
+        "T043",
+        "T044",
+        "T051"
+      ],
+      "design_refs": [
+        "3.5 `generate_report`",
+        "7. Reports and security",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/report/render.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/report-render.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/report-render.test.ts, test \"report.json validates against the section 7\": report.json validates against the section 7 schema",
+        "test/report-render.test.ts, test \"report.md contains every finding id\": report.md contains every finding id",
+        "test/report-render.test.ts, test \"two scan+report runs of the planted-js tree\": T-12: two scan+report runs of the planted-js tree give identical report.json after deleting the fields generatedAt, scanId and repoRealPath from both",
+        "test/report-render.test.ts, test \"report.md of those two runs is byte-identical\": T-12: report.md of those two runs is byte-identical",
+        "test/report-render.test.ts, test \"a CRLF copy of the planted-js tree (every LF\": T-12: a CRLF copy of the planted-js tree (every LF replaced by CRLF) gives a report.json identical to the LF run after deleting generatedAt, scanId and repoRealPath from both",
+        "test/report-render.test.ts, test \"includeEvidence=false omits evidence from\": includeEvidence=false omits evidence from report.json findings"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/report-render.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T053",
+      "title": "SARIF run and level mapping",
+      "intent": "Implement src/report/sarif.ts: SARIF 2.1.0 results[] with level mapping. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has sarif.ts levels; locations/rules do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/sarif-levels.test.ts`. Revert (after its dependents) = undo src/report/sarif.ts, test/sarif-levels.test.ts.",
+      "depends_on": [
+        "T052"
+      ],
+      "design_refs": [
+        "3.5 `generate_report`",
+        "7. Reports and security"
+      ],
+      "changes": [
+        {
+          "path": "src/report/sarif.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/sarif-levels.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/sarif-levels.test.ts, test \"sarif version\": the SARIF document produced by src/report/sarif.ts for any scan has top-level version === \"2.1.0\"",
+        "test/sarif-levels.test.ts, test \"severity to level\": a finding with severity \"critical\" => results[0].level === \"error\"",
+        "test/sarif-levels.test.ts, test \"severity to level\": a finding with severity \"high\" => results[0].level === \"error\"",
+        "test/sarif-levels.test.ts, test \"severity to level\": a finding with severity \"medium\" => results[0].level === \"warning\"",
+        "test/sarif-levels.test.ts, test \"severity to level\": a finding with severity \"low\" => results[0].level === \"note\"",
+        "test/sarif-levels.test.ts, test \"severity to level\": a finding with severity \"info\" => results[0].level === \"note\""
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/sarif-levels.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T054",
+      "title": "SARIF locations, fingerprints and rules",
+      "intent": "Extend sarif.ts with locations, partialFingerprints, properties and tool.driver.rules. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has complete sarif.ts; generate_report tool does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/sarif-locations.test.ts`. Revert (after its dependents) = undo src/report/sarif.ts, test/sarif-locations.test.ts.",
+      "depends_on": [
+        "T053"
+      ],
+      "design_refs": [
+        "3.5 `generate_report`",
+        "7. Reports and security"
+      ],
+      "changes": [
+        {
+          "path": "src/report/sarif.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/sarif-locations.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/sarif-locations.test.ts, test \"artifact uri\": finding at path \"src/a/b.js\" => results[0].locations[0].physicalLocation.artifactLocation.uri === \"src/a/b.js\" (relative, no absolute prefix)",
+        "test/sarif-locations.test.ts, test \"region\": finding line 7 column 3 => region.startLine === 7 and region.startColumn === 3",
+        "test/sarif-locations.test.ts, test \"fingerprint\": results[0].partialFingerprints.primary === finding.fingerprint",
+        "test/sarif-locations.test.ts, test \"rules list\": for findings with ruleIds [A,B,A] => tool.driver.rules ids deepEqual [\"A\",\"B\"] (exactly the used ruleIds, no duplicates)",
+        "test/sarif-locations.test.ts, test \"driver version\": tool.driver.version === serverVersion (same string list_scanners returns)",
+        "test/sarif-locations.test.ts, test \"properties\": results[0].properties has keys confidence, cwe and scanner equal to the finding values"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/sarif-locations.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T055",
+      "title": "generate_report tool",
+      "intent": "Implement src/tools/generateReport.ts with allowPartial semantics, output dir validation and writer wiring. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has generate_report tool; secret-leak test, server do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/generate-report.test.ts` and eslint. Revert (after its dependents) = undo src/tools/generateReport.ts, test/generate-report.test.ts.",
+      "depends_on": [
+        "T020",
+        "T048",
+        "T050",
+        "T051",
+        "T052",
+        "T054"
+      ],
+      "design_refs": [
+        "3.5 `generate_report`",
+        "7. Reports and security",
+        "11. Defense trade-offs",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/tools/generateReport.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/generate-report.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/generate-report.test.ts, test \"running job\": T-30 (F-18): running job => E_SCAN_NOT_COMPLETE with retryable true",
+        "test/generate-report.test.ts, test \"timed_out job with allowPartial false\": T-30 (F-18): timed_out job with allowPartial false => E_SCAN_NOT_COMPLETE",
+        "test/generate-report.test.ts, test \"timed_out job with allowPartial true\": T-30 (F-18): timed_out job with allowPartial true => files length 2 and partial true",
+        "test/generate-report.test.ts, test \"default formats write report.md and report.json\": default formats write report.md and report.json only",
+        "test/generate-report.test.ts, test \"unknown scanId\": generate_report {scanId:\"S-000000000000-9\"} => isError true and structuredContent.error.code === \"E_NOT_FOUND\"",
+        "test/generate-report.test.ts, test \"section 11 E_OUTPUT_DIR_UNSAFE row: outputDir\": section 11 E_OUTPUT_DIR_UNSAFE row: outputDir inside target => E_OUTPUT_DIR_UNSAFE and no file written"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/generate-report.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx eslint src",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T056",
+      "title": "Report secret-leak guard (G3)",
+      "intent": "Wire assertNoSecrets into every generated file and log line; test plus minimal modify. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has leak guard wired; MCP transport does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/report-secrets.test.ts`. Revert (after its dependents) = undo src/tools/generateReport.ts, test/report-secrets.test.ts.",
+      "depends_on": [
+        "T017",
+        "T054",
+        "T055"
+      ],
+      "design_refs": [
+        "7. Reports and security",
+        "11. Defense trade-offs",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/tools/generateReport.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/report-secrets.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/report-secrets.test.ts, test \"T-13 (F-13) report.md\": generate_report (formats md, json, sarif) on the planted-js tree; in the report.md read from the output dir, no 5-char substring of the AKIA key of the planted-js .env (AKIA + 16 chars at .env:2:19) after its first REDACT_PREFIX (4) chars occurs",
+        "test/report-secrets.test.ts, test \"T-13 (F-13) report.json\": in the report.json of that same generate_report run, no 5-char substring of the AKIA key of the planted-js .env (AKIA + 16 chars at .env:2:19) after its first 4 chars occurs",
+        "test/report-secrets.test.ts, test \"T-13 (F-13) report.sarif.json\": in the report.sarif.json of that same run, no 5-char substring of the AKIA key of the planted-js .env (AKIA + 16 chars at .env:2:19) after its first 4 chars occurs",
+        "test/report-secrets.test.ts, test \"T-13 (F-13) captured logs\": during that same generate_report call process.stderr.write and console.log/warn/error are replaced by recorders, and no recorded string contains a 5-char substring of the AKIA key of the planted-js .env (AKIA + 16 chars at .env:2:19) after its first 4 chars",
+        "test/report-secrets.test.ts, test \"T-13 (F-13) API_SECRET\": in a tree whose config file holds API_SECRET=<24-char value>, none of the three report files (md, json, sarif.json) contains a 5-char substring of that value",
+        "test/report-secrets.test.ts, test \"assertNoSecrets is invoked once per generated\": assertNoSecrets is invoked once per generated file (spy count 3 for 3 formats)"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/report-secrets.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T057",
+      "title": "list_scanners tool",
+      "intent": "Implement src/tools/listScanners.ts. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has listScanners.ts; limits assertions, server do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/list-scanners.test.ts`. Revert (after its dependents) = undo src/tools/listScanners.ts, test/list-scanners.test.ts.",
+      "depends_on": [
+        "T030",
+        "T037",
+        "T042",
+        "T056"
+      ],
+      "design_refs": [
+        "3.6 `list_scanners`"
+      ],
+      "changes": [
+        {
+          "path": "src/tools/listScanners.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/list-scanners.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/list-scanners.test.ts, test \"output validates against the 3.6 schema\": output validates against the 3.6 schema",
+        "test/list-scanners.test.ts, test \"list_scanners: non-empty input\": tools/call list_scanners with arguments {\"x\":1} returns isError true, structuredContent.error.code \"E_INVALID_INPUT\" and structuredContent.error.retryable false (the same call with {} succeeds)",
+        "test/list-scanners.test.ts, test \"scanners array has 4 entries dependency,\": scanners array has 4 entries dependency, secret, static, config",
+        "test/list-scanners.test.ts, test \"networkAllowed is false when\": networkAllowed is false when VULN_MCP_ALLOW_NETWORK is unset",
+        "test/list-scanners.test.ts, test \"advisoryDb.present is false when no DB exists\": advisoryDb.present is false when no DB exists",
+        "test/list-scanners.test.ts, test \"advisoryDb.stale is true when DB age is\": advisoryDb.stale is true when DB age is STALE_DAYS+1"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/list-scanners.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T058",
+      "title": "list_scanners limits",
+      "intent": "Assert limits block of list_scanners equals 2.2. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has limits test; server does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/list-scanners-limits.test.ts`. Revert (after its dependents) = undo test/list-scanners-limits.test.ts.",
+      "depends_on": [
+        "T057"
+      ],
+      "design_refs": [
+        "3.6 `list_scanners`",
+        "2.2 Constants (options, limits, env)"
+      ],
+      "changes": [
+        {
+          "path": "test/list-scanners-limits.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/list-scanners-limits.test.ts, test \"limits: maxFiles\": assert.deepStrictEqual(out.limits.maxFiles, {default:50000,min:1,max:500000}) where out is the listScanners() output",
+        "test/list-scanners-limits.test.ts, test \"limits: maxFileBytes\": assert.deepStrictEqual(out.limits.maxFileBytes, {default:1048576,min:1024,max:8388608})",
+        "test/list-scanners-limits.test.ts, test \"limits: maxTotalBytes\": assert.deepStrictEqual(out.limits.maxTotalBytes, {default:536870912,min:1048576,max:4294967296})",
+        "test/list-scanners-limits.test.ts, test \"limits: maxFindings\": assert.deepStrictEqual(out.limits.maxFindings, {default:5000,min:1,max:50000})",
+        "test/list-scanners-limits.test.ts, test \"limits: timeoutMs\": assert.deepStrictEqual(out.limits.timeoutMs, {default:120000,min:1000,max:900000})",
+        "test/list-scanners-limits.test.ts, test \"limits: scalars\": assert.strictEqual(out.limits.getFindingsMax, 200), assert.strictEqual(out.limits.maxRunning, 2), assert.strictEqual(out.limits.maxQueued, 8)"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/list-scanners-limits.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T059",
+      "title": "MCP stdio server entrypoint",
+      "intent": "Extend the skeleton stdio server src/server.ts and src/index.ts (which already register scan_repository and get_scan_status) to the full contract: 6 tools, startup rule self-test exit 2, E_INTERNAL fallback, safe logging. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has runnable stdio server; fixtures and e2e do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/server.test.ts` and eslint. Revert (after its dependents) = undo src/server.ts, src/index.ts, test/server.test.ts.",
+      "depends_on": [
+        "T049",
+        "T056",
+        "T058"
+      ],
+      "design_refs": [
+        "3.6 `list_scanners`",
+        "6. Job state machine",
+        "7. Reports and security",
+        "9. Failure modes"
+      ],
+      "changes": [
+        {
+          "path": "src/server.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "src/index.ts",
+          "kind": "modify"
+        },
+        {
+          "path": "test/server.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "tools/list over stdio (node --import tsx src/index.ts) returns exactly scan_repository, get_scan_status, cancel_scan, get_findings, generate_report, list_scanners",
+        "test \"T-27 (F-14a) bad rule exit code\": a child process `node --import tsx src/index.ts` started with a rule file whose single rule has pattern \"abc\" and shouldMatch sample \"xyz\" exits with code 2",
+        "test/server.test.ts, test \"T-27 (F-14a) stderr\": the stderr of that same child process contains the text E_RULE_INVALID",
+        "test/server.test.ts, test \"T-27 (F-14a) no tools\": an SDK client connected over stdio to that same child process gets no tools/list result (the process exits before serving any tool)",
+        "test/server.test.ts, test \"unexpected exception inside a handler returns\": unexpected exception inside a handler returns an E_INTERNAL envelope",
+        "test/server.test.ts, test \"logs contain only ruleId, counts and relative\": logs contain only ruleId, counts and relative paths (no absolute path or evidence)"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/server.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx eslint src",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 3
+    },
+    {
+      "id": "T060",
+      "title": "Planted fixture tree builders",
+      "intent": "Create deterministic builders for planted-js, planted-py and clean at section 10 positions. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has tree builders; advisory DB fixtures and e2e do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/fixtures-build.test.ts`. Revert (after its dependents) = undo test/fixtures/build.ts, test/fixtures/lockfiles.ts, test/fixtures-build.test.ts.",
+      "depends_on": [
+        "T059"
+      ],
+      "design_refs": [
+        "10. Fixtures and acceptance tests"
+      ],
+      "changes": [
+        {
+          "path": "test/fixtures/build.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/fixtures/lockfiles.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/fixtures-build.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/fixtures-build.test.ts, test \"planted-js builder output has the 10 listed\": planted-js builder output has the 10 listed (ruleId,path,line) positions",
+        "test/fixtures-build.test.ts, test \"planted-py builder output has the 9 listed\": planted-py builder output has the 9 listed positions",
+        "test/fixtures-build.test.ts, test \"clean builder output contains none of the\": clean builder output contains none of the planted markers",
+        "test/fixtures-build.test.ts, test \"planted-js .env has the AKIA key at line 2\": planted-js .env has the AKIA key at line 2 column 19",
+        "test/fixtures-build.test.ts, test \"planted-py keys/test.pem has the BEGIN PRIVATE\": planted-py keys/test.pem has the BEGIN PRIVATE KEY line at line 1",
+        "test/fixtures-build.test.ts, test \"two builder runs produce byte-identical trees\": two builder runs produce byte-identical trees"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/fixtures-build.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T061",
+      "title": "Advisory DB fixtures",
+      "intent": "Create advisory DB fixtures for lodash and requests. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has advisory DB fixtures; e2e does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/advisory-fixtures.test.ts`. Revert (after its dependents) = undo test/fixtures/advisory-db.ts, test/advisory-fixtures.test.ts.",
+      "depends_on": [
+        "T060"
+      ],
+      "design_refs": [
+        "10. Fixtures and acceptance tests",
+        "2.2 Constants (options, limits, env)"
+      ],
+      "changes": [
+        {
+          "path": "test/fixtures/advisory-db.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/advisory-fixtures.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/advisory-fixtures.test.ts, test \"fixture manifest.json has schemaVersion 1 and a\": fixture manifest.json has schemaVersion 1 and a generatedAt",
+        "test/advisory-fixtures.test.ts, test \"lodash shard contentSha256 matches its\": lodash shard contentSha256 matches its advisories content",
+        "test/advisory-fixtures.test.ts, test \"requests shard contentSha256 matches its\": requests shard contentSha256 matches its advisories content",
+        "test/advisory-fixtures.test.ts, test \"lodash 4.17.15 advisory has CVSS 7.4\": lodash 4.17.15 advisory has CVSS 7.4",
+        "test/advisory-fixtures.test.ts, test \"requests 2.19.0 is affected by the requests\": requests 2.19.0 is affected by the requests advisory",
+        "test/advisory-fixtures.test.ts, test \"the fixture loads through src/advisory/db.ts\": the fixture loads through src/advisory/db.ts with 0 warnings"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/advisory-fixtures.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 1
+    },
+    {
+      "id": "T062",
+      "title": "End-to-end detection acceptance (T-01)",
+      "intent": "Add e2e test running scan_repository through server handlers on planted fixtures. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has e2e detection test; e2e properties do not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/e2e-detection.test.ts`. Revert (after its dependents) = undo test/e2e-detection.test.ts.",
+      "depends_on": [
+        "T061"
+      ],
+      "design_refs": [
+        "10. Fixtures and acceptance tests",
+        "1. Goals / non-goals"
+      ],
+      "changes": [
+        {
+          "path": "test/e2e-detection.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/e2e-detection.test.ts, test \"planted-js yields exactly the 10 listed\": T-01: planted-js yields exactly the 10 listed (ruleId,path,line) tuples and 0 extra",
+        "test/e2e-detection.test.ts, test \"planted-js riskScore 72 and rating critical\": T-01: planted-js riskScore 72 and rating critical",
+        "test/e2e-detection.test.ts, test \"planted-py yields exactly the 9 listed tuples\": T-01: planted-py yields exactly the 9 listed tuples and 0 extra",
+        "test/e2e-detection.test.ts, test \"planted-py riskScore 80 and rating critical\": T-01: planted-py riskScore 80 and rating critical",
+        "test/e2e-detection.test.ts, test \"clean yields 0 findings\": T-01: clean yields 0 findings",
+        "test/e2e-detection.test.ts, test \"clean riskScore 0 and rating none\": T-01: clean riskScore 0 and rating none"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/e2e-detection.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 3
+    },
+    {
+      "id": "T063",
+      "title": "End-to-end properties (G1-G5)",
+      "intent": "Add e2e test for redaction, determinism, no-network and time bound. Observation: each acceptance item is asserted by a node:test case in this task's test file(s) (the test title begins with the item's T-id or key phrase); verify[0] runs them and exits non-zero on any failed assertion. Rollback/partial: after this task the tree has e2e properties test; traceability gate does not exist yet, so nothing is half-wired; the state is green when `node --import tsx --test test/e2e-properties.test.ts`. Revert (after its dependents) = undo test/e2e-properties.test.ts.",
+      "depends_on": [
+        "T061",
+        "T062"
+      ],
+      "design_refs": [
+        "10. Fixtures and acceptance tests",
+        "1. Goals / non-goals"
+      ],
+      "changes": [
+        {
+          "path": "test/e2e-properties.test.ts",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/e2e-properties.test.ts, test \"SEC-AWS-ACCESS-KEY-ID found at .env:2:19 with\": SEC-AWS-ACCESS-KEY-ID found at .env:2:19 with evidence \"AKIA****[REDACTED len=20]\"",
+        "test/e2e-properties.test.ts, test \"SEC-PRIVATE-KEY found at keys/test.pem:1 and\": SEC-PRIVATE-KEY found at keys/test.pem:1 and evidence has no key body",
+        "test/e2e-properties.test.ts, test \"G2: two sequential identical scans produce\": G2: two sequential identical scans produce byte-identical findings JSON",
+        "test/e2e-properties.test.ts, test \"G4: a default scan performs 0 network calls\": G4: a default scan performs 0 network calls",
+        "test/e2e-properties.test.ts, test \"G5: a scan of planted-js finishes within\": G5: a scan of planted-js finishes within PERF_TARGET_S (20 s)",
+        "test/e2e-properties.test.ts, test \"G1: one scan_repository call runs all 4 scanners\": G1: one scan_repository call runs all 4 scanners"
+      ],
+      "verify": [
+        {
+          "command": "node --import tsx --test test/e2e-properties.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "npx tsc --noEmit && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        }
+      ],
+      "estimate_rounds": 2
+    },
+    {
+      "id": "T064",
+      "title": "Final traceability gate (T-14) and full-suite run",
+      "intent": "Add test/traceability.test.ts, test/fixtures/section11-map.json and test/fixtures/check-ids.cjs (CLI `node check-ids.cjs <design.md> <testsDir>`: reads the first cells of the section 9 table (31 F-ids incl. suffixed) and section 10 table (35 T-ids incl. T-10b), collects test()/it()/describe() titles of <testsDir>/*.test.ts, prints one line `MISSING: <id>` per missing id on stdout and exit 1, or prints `OK: 66 ids found` on stdout and exit 0; on missing arguments or unreadable input prints `ERROR: <reason>` on stderr and exit 2; its behaviour is pre-validated by a self-test in test/traceability.test.ts against temp fixture directories), then run the entire suite. Judgment method: the traceability test reads docs/design-repo-vuln-report-mcp.md and the test/*.test.ts sources with fs and decides pass/fail itself as listed in the acceptance items (E_* codes from ERROR_CODES in src/errors.ts, W_* tokens from design sections 4 and 9, T-04..T-34 in test titles, the goals map, and the section 11 table rows against section11-map.json). Rollback/partial: after this task the tree has the complete project and no gaps remain; the state is green when the full-suite command exits 0. Revert (after its dependents) = undo test/traceability.test.ts, test/fixtures/section11-map.json, test/fixtures/check-ids.cjs.",
+      "depends_on": [
+        "T063"
+      ],
+      "design_refs": [
+        "1. Goals / non-goals",
+        "9. Failure modes",
+        "10. Fixtures and acceptance tests",
+        "11. Defense trade-offs"
+      ],
+      "changes": [
+        {
+          "path": "test/traceability.test.ts",
+          "kind": "add"
+        },
+        {
+          "path": "test/fixtures/section11-map.json",
+          "kind": "add"
+        },
+        {
+          "path": "test/fixtures/check-ids.cjs",
+          "kind": "add"
+        }
+      ],
+      "acceptance": [
+        "test/traceability.test.ts, test \"T-14 E_* and W_* codes covered\": (a) the 16 names from ERROR_CODES (src/errors.ts) each occur as text in at least one other test/*.test.ts file (0 uncovered); (b) the distinct W_[A-Z_]+ tokens in the design file between the line starting `## 4.` and `## 5.` and between `## 9.` and `## 10.` each occur in at least one other test/*.test.ts file (0 uncovered)",
+        "test/traceability.test.ts, test \"test ids and failure-mode ids present\": collects every title string passed to test(, it( or describe( in test/*.test.ts; passes only if (a) every id in the first cell of the section 10 table rows (T-01..T-34 plus T-10b, 35 ids) occurs in some collected title and (b) every id in the first cell of the section 9 table rows (F-01..F-19 incl. F-02a, F-02b, F-05b, F-05c, F-06a, F-07a, F-07b, F-08a, F-08b, F-09a, F-11a, F-14a, 31 ids) occurs in some collected title; an id counts only when not followed by a digit or lowercase letter (F-02 is not satisfied by F-02a)",
+        "test/traceability.test.ts, test \"goals map\": assert.deepStrictEqual(GOALS, {G1:\"T-01\",G2:\"T-12\",G3:\"T-13\",G4:\"T-11\",G5:\"T-08\",G6:\"T-12\"}) and each mapped T-id is contained in some collected test()/it()/describe() title",
+        "test/traceability.test.ts, test \"section 11 rows covered\": the rows are the data rows of the markdown table under the heading `## 11. Defense trade-offs` in the design file (lines starting with `|` after the header and `|---|` rows; first cell = mechanism; parsed count asserted equal to 19). test/fixtures/section11-map.json is an array of {mechanism, tests:[title substrings], residual?:string}. Passes when the set of mechanism values equals the set of first cells exactly and every entry has either a non-empty tests array whose every substring occurs in some collected title, or an empty tests array with residual a non-empty string starting `RESIDUAL:`",
+        "test/traceability.test.ts, test \"check-ids.cjs self-test\": spawns `node test/fixtures/check-ids.cjs <design.md> <dir>` on the real design file. (1) temp dir holding one .test.ts with titles of all 66 ids except F-14a => exit code 1, stdout contains the line \"MISSING: F-14a\" and no other MISSING line. (2) temp dir with all 66 ids => exit code 0, stdout is exactly \"OK: 66 ids found\". (3) no arguments => exit code 2, stderr starts with \"ERROR:\"; nonexistent design path => exit 2",
+        "verify[0] (tsc --noEmit, eslint ., node --import tsx --test test/*.test.ts) exits 0; verify[5] `node test/fixtures/check-ids.cjs docs/design-repo-vuln-report-mcp.md test` exits 0 with stdout \"OK: 66 ids found\"; verify[6] runs it on an empty temp dir and has expect_exit_code 1 (stdout lists MISSING: lines)"
+      ],
+      "verify": [
+        {
+          "command": "npx tsc --noEmit && npx eslint . && node --import tsx --test test/*.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "node --import tsx --test test/traceability.test.ts",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "grep -rq \"export\" src",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "grep -rEn \"(from|require\\()[[:space:]]*[\\\"'](node:)?(https?|net|tls|dgram|dns|http2)[\\\"']|(^|[^A-Za-z0-9_.])fetch\\(|XMLHttpRequest|WebSocket|undici\" src --exclude-dir=net",
+          "expect_exit_code": 1
+        },
+        {
+          "command": "d=$(mktemp -d); rc=0; mkdir -p \"$d/src/net\" || rc=1; for s in 'import h from \"node:https\";' 'const r = await fetch(u);' 'import n from \"net\";' 'const w = new WebSocket(u);' 'import { request } from \"undici\";'; do printf '%s\n' \"$s\" > \"$d/src/p.ts\"; grep -rEn \"(from|require\\()[[:space:]]*[\\\"'](node:)?(https?|net|tls|dgram|dns|http2)[\\\"']|(^|[^A-Za-z0-9_.])fetch\\(|XMLHttpRequest|WebSocket|undici\" \"$d/src\" --exclude-dir=net >/dev/null || rc=1; done; printf '%s\n' 'import h from \"node:https\";' > \"$d/src/net/ok.ts\"; printf '%s\n' 'const f = prefetch(u); import x from \"node:path\"; const s = new Set();' > \"$d/src/p.ts\"; grep -rEn \"(from|require\\()[[:space:]]*[\\\"'](node:)?(https?|net|tls|dgram|dns|http2)[\\\"']|(^|[^A-Za-z0-9_.])fetch\\(|XMLHttpRequest|WebSocket|undici\" \"$d/src\" --exclude-dir=net >/dev/null; [ $? -eq 1 ] || rc=1; rm -rf \"$d\"; [ $rc -eq 0 ]",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "node test/fixtures/check-ids.cjs docs/design-repo-vuln-report-mcp.md test",
+          "expect_exit_code": 0
+        },
+        {
+          "command": "e=$(mktemp -d); node test/fixtures/check-ids.cjs docs/design-repo-vuln-report-mcp.md \"$e\"; rc=$?; rm -rf \"$e\"; exit $rc",
+          "expect_exit_code": 1
+        }
+      ],
+      "estimate_rounds": 2
+    }
+  ]
+}

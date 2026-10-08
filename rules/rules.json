@@ -1,0 +1,250 @@
+{
+  "rules": [
+    {
+      "id": "STA-JS-EVAL-001",
+      "title": "Use of eval() on dynamic code",
+      "languages": [
+        "javascript"
+      ],
+      "pattern": "\\beval\\s*\\(",
+      "negativePattern": "^\\s*(?://|\\*)",
+      "severity": "high",
+      "confidence": "medium",
+      "cwe": "CWE-95",
+      "tests": {
+        "shouldMatch": [
+          "const r = eval(userInput);"
+        ],
+        "shouldNotMatch": [
+          "evaluate(x);",
+          "// eval(x) is dangerous"
+        ]
+      }
+    },
+    {
+      "id": "STA-CMDI-001",
+      "title": "Shell command built from dynamic input",
+      "languages": [
+        "javascript"
+      ],
+      "pattern": "\\b(?:exec|execSync)\\s*\\([^)]*(?:\\+|\\$\\{)",
+      "severity": "high",
+      "confidence": "medium",
+      "cwe": "CWE-78",
+      "tests": {
+        "shouldMatch": [
+          "exec(\"ls \" + req.query.dir);",
+          "execSync(`ls ${dir}`);"
+        ],
+        "shouldNotMatch": [
+          "exec(\"ls -la\");"
+        ]
+      }
+    },
+    {
+      "id": "STA-SQLI-001",
+      "title": "SQL query built by string concatenation",
+      "languages": [
+        "javascript"
+      ],
+      "pattern": "(?i:\\b(?:select|insert|update|delete)\\b[^\"'`]*)[\"'`]\\s*\\+|(?i:\\b(?:select|insert|update|delete)\\b[^`]*)\\$\\{",
+      "severity": "high",
+      "confidence": "medium",
+      "cwe": "CWE-89",
+      "tests": {
+        "shouldMatch": [
+          "db.query(\"SELECT * FROM users WHERE id = \" + id);",
+          "db.query(`SELECT * FROM users WHERE id = ${id}`);"
+        ],
+        "shouldNotMatch": [
+          "db.query(\"SELECT * FROM users WHERE id = ?\", [id]);"
+        ]
+      }
+    },
+    {
+      "id": "STA-CRYPTO-001",
+      "title": "Weak hash algorithm (MD5 or SHA-1)",
+      "languages": [
+        "javascript"
+      ],
+      "pattern": "(?i:createHash)\\(\\s*[\"'](?i:md5|sha1)[\"']",
+      "severity": "medium",
+      "confidence": "high",
+      "cwe": "CWE-327",
+      "tests": {
+        "shouldMatch": [
+          "crypto.createHash('md5').update(p)"
+        ],
+        "shouldNotMatch": [
+          "crypto.createHash('sha256').update(p)"
+        ]
+      }
+    },
+    {
+      "id": "STA-PATH-001",
+      "title": "File path built from request input",
+      "languages": [
+        "javascript"
+      ],
+      "pattern": "\\b(?:readFile|readFileSync|createReadStream|sendFile)\\s*\\([^)]*\\b(?:req|request)\\.|\\bpath\\.join\\([^)]*\\b(?:req|request)\\.",
+      "severity": "medium",
+      "confidence": "low",
+      "cwe": "CWE-22",
+      "tests": {
+        "shouldMatch": [
+          "fs.readFileSync(req.query.file);",
+          "const p = path.join(base, req.params.name);"
+        ],
+        "shouldNotMatch": [
+          "fs.readFileSync(\"config.json\");"
+        ]
+      }
+    },
+    {
+      "id": "CFG-CORS-WILDCARD-001",
+      "title": "CORS allows any origin",
+      "languages": [
+        "javascript"
+      ],
+      "pattern": "(?i:access-control-allow-origin)[\"']?\\s*[:,]\\s*[\"']\\*[\"']|\\borigin\\s*:\\s*[\"']\\*[\"']",
+      "severity": "medium",
+      "confidence": "high",
+      "cwe": "CWE-942",
+      "tests": {
+        "shouldMatch": [
+          "res.setHeader(\"Access-Control-Allow-Origin\", \"*\");",
+          "app.use(cors({ origin: '*' }));"
+        ],
+        "shouldNotMatch": [
+          "res.setHeader(\"Access-Control-Allow-Origin\", \"https://example.com\");"
+        ]
+      }
+    },
+    {
+      "id": "STA-DESER-PY-001",
+      "title": "Unsafe deserialization with pickle or marshal",
+      "languages": [
+        "python"
+      ],
+      "pattern": "\\b(?:pickle|cPickle|marshal)\\.loads?\\s*\\(",
+      "severity": "high",
+      "confidence": "high",
+      "cwe": "CWE-502",
+      "tests": {
+        "shouldMatch": [
+          "obj = pickle.loads(data)"
+        ],
+        "shouldNotMatch": [
+          "obj = json.loads(data)"
+        ]
+      }
+    },
+    {
+      "id": "STA-PY-CMDI-001",
+      "title": "Shell command built from dynamic input",
+      "languages": [
+        "python"
+      ],
+      "pattern": "\\bos\\.(?:system|popen)\\s*\\(|\\bsubprocess\\.\\w+\\s*\\([^)]*shell\\s*=\\s*True",
+      "negativePattern": "^\\s*#",
+      "severity": "high",
+      "confidence": "medium",
+      "cwe": "CWE-78",
+      "tests": {
+        "shouldMatch": [
+          "os.system(\"ls \" + name)",
+          "subprocess.run(cmd, shell=True)"
+        ],
+        "shouldNotMatch": [
+          "subprocess.run([\"ls\"], shell=False)",
+          "# os.system(x)"
+        ]
+      }
+    },
+    {
+      "id": "STA-DESER-PY-002",
+      "title": "yaml.load without a safe loader",
+      "languages": [
+        "python"
+      ],
+      "pattern": "\\byaml\\.load\\s*\\(",
+      "negativePattern": "SafeLoader|^\\s*#",
+      "severity": "high",
+      "confidence": "medium",
+      "cwe": "CWE-502",
+      "tests": {
+        "shouldMatch": [
+          "data = yaml.load(text)"
+        ],
+        "shouldNotMatch": [
+          "data = yaml.safe_load(text)",
+          "data = yaml.load(text, Loader=yaml.SafeLoader)"
+        ]
+      }
+    },
+    {
+      "id": "CFG-DEBUG-ENABLED-001",
+      "title": "Debug mode enabled",
+      "languages": [
+        "python"
+      ],
+      "pattern": "^\\s*DEBUG\\s*=\\s*True\\b|\\bdebug\\s*=\\s*True\\b",
+      "negativePattern": "^\\s*#",
+      "severity": "medium",
+      "confidence": "medium",
+      "cwe": "CWE-489",
+      "tests": {
+        "shouldMatch": [
+          "DEBUG = True",
+          "app.run(debug=True)"
+        ],
+        "shouldNotMatch": [
+          "DEBUG = False",
+          "# DEBUG = True"
+        ]
+      }
+    },
+    {
+      "id": "CFG-GHA-PULL-REQUEST-TARGET-001",
+      "title": "Workflow uses pull_request_target",
+      "languages": [
+        "github-actions"
+      ],
+      "pattern": "\\bpull_request_target\\b",
+      "negativePattern": "^\\s*#",
+      "severity": "medium",
+      "confidence": "low",
+      "cwe": "CWE-829",
+      "tests": {
+        "shouldMatch": [
+          "on: pull_request_target",
+          "  pull_request_target:"
+        ],
+        "shouldNotMatch": [
+          "on: pull_request",
+          "# pull_request_target"
+        ]
+      }
+    },
+    {
+      "id": "CFG-GHA-SCRIPT-INJECTION-001",
+      "title": "Untrusted GitHub context interpolated into a script",
+      "languages": [
+        "github-actions"
+      ],
+      "pattern": "\\$\\{\\{\\s*github\\.(?:event\\.(?:issue\\.(?:title|body)|pull_request\\.(?:title|body|head\\.ref|head\\.label)|comment\\.body|review\\.body|head_commit\\.message)|head_ref)\\s*\\}\\}",
+      "severity": "high",
+      "confidence": "high",
+      "cwe": "CWE-94",
+      "tests": {
+        "shouldMatch": [
+          "run: echo \"${{ github.event.issue.title }}\"",
+          "run: echo ${{ github.head_ref }}"
+        ],
+        "shouldNotMatch": [
+          "run: echo \"${{ github.sha }}\""
+        ]
+      }
+    }
+  ]
+}

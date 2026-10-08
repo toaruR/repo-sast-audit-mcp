@@ -1,0 +1,529 @@
+{
+  "scan_repository": {
+    "input": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "repoPath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "scanners": {
+          "type": "array",
+          "items": {
+            "$ref": "d#/Scn"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "online": {
+              "type": "boolean"
+            },
+            "symlinkPolicy": {
+              "enum": [
+                "skip",
+                "follow-within-root"
+              ]
+            },
+            "respectGitignore": {
+              "type": "boolean"
+            },
+            "strictLimits": {
+              "type": "boolean"
+            },
+            "includeGlobs": {
+              "$ref": "d#/Globs"
+            },
+            "excludeGlobs": {
+              "$ref": "d#/Globs"
+            },
+            "advisoryDbPath": {
+              "type": "string"
+            },
+            "limits": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "maxFiles": {
+                  "type": "integer",
+                  "x-limit": "maxFiles"
+                },
+                "maxFileBytes": {
+                  "type": "integer",
+                  "x-limit": "maxFileBytes"
+                },
+                "maxTotalBytes": {
+                  "type": "integer",
+                  "x-limit": "maxTotalBytes"
+                },
+                "maxFindings": {
+                  "type": "integer",
+                  "x-limit": "maxFindings"
+                },
+                "timeoutMs": {
+                  "type": "integer",
+                  "x-limit": "timeoutMs"
+                }
+              }
+            }
+          }
+        },
+        "force": {
+          "type": "boolean"
+        },
+        "waitMs": {
+          "type": "integer",
+          "x-limit": "waitMs"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "scanId",
+        "state",
+        "requestKey",
+        "reused",
+        "warnings"
+      ],
+      "properties": {
+        "scanId": {
+          "$ref": "d#/Sid"
+        },
+        "state": {
+          "$ref": "d#/St"
+        },
+        "requestKey": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "reused": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "d#/Wrn"
+          }
+        },
+        "repoRealPath": {
+          "type": "string"
+        },
+        "progress": {
+          "$ref": "d#/Prog"
+        },
+        "summary": {
+          "$ref": "d#/Sum"
+        }
+      }
+    }
+  },
+  "get_scan_status": {
+    "input": {
+      "type": "object",
+      "required": [
+        "scanId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scanId": {
+          "$ref": "d#/Sid"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "scanId",
+        "state",
+        "progress",
+        "cancelRequested",
+        "truncated"
+      ],
+      "properties": {
+        "scanId": {
+          "$ref": "d#/Sid"
+        },
+        "state": {
+          "$ref": "d#/St"
+        },
+        "progress": {
+          "$ref": "d#/Prog"
+        },
+        "cancelRequested": {
+          "type": "boolean"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "durationMs": {
+          "$ref": "d#/N"
+        },
+        "error": {
+          "$ref": "d#/Err"
+        },
+        "summary": {
+          "$ref": "d#/Sum"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "d#/Wrn"
+          }
+        }
+      }
+    }
+  },
+  "cancel_scan": {
+    "input": {
+      "type": "object",
+      "required": [
+        "scanId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scanId": {
+          "$ref": "d#/Sid"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "scanId",
+        "state",
+        "cancelRequested"
+      ],
+      "properties": {
+        "scanId": {
+          "$ref": "d#/Sid"
+        },
+        "state": {
+          "$ref": "d#/St"
+        },
+        "cancelRequested": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "get_findings": {
+    "input": {
+      "type": "object",
+      "required": [
+        "scanId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scanId": {
+          "$ref": "d#/Sid"
+        },
+        "cursor": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        },
+        "includeEvidence": {
+          "type": "boolean"
+        },
+        "filter": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "minSeverity": {
+              "$ref": "d#/Sev"
+            },
+            "scanners": {
+              "type": "array",
+              "items": {
+                "$ref": "d#/Scn"
+              },
+              "uniqueItems": true
+            },
+            "ruleIds": {
+              "$ref": "d#/SL"
+            },
+            "cwe": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^CWE-[0-9]+$"
+              }
+            },
+            "pathPrefix": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          }
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "scanId",
+        "state",
+        "complete",
+        "total",
+        "findings",
+        "nextCursor",
+        "untrusted"
+      ],
+      "properties": {
+        "scanId": {
+          "$ref": "d#/Sid"
+        },
+        "state": {
+          "$ref": "d#/St"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "total": {
+          "$ref": "d#/N"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "d#/Fnd"
+          }
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "untrusted": {
+          "$ref": "d#/SL"
+        }
+      }
+    }
+  },
+  "generate_report": {
+    "input": {
+      "type": "object",
+      "required": [
+        "scanId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scanId": {
+          "$ref": "d#/Sid"
+        },
+        "formats": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "md",
+              "json",
+              "sarif"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "outputDir": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "allowWriteInsideTarget": {
+          "type": "boolean"
+        },
+        "allowPartial": {
+          "type": "boolean"
+        },
+        "includeEvidence": {
+          "type": "boolean"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "scanId",
+        "outputDir",
+        "files",
+        "summary",
+        "partial"
+      ],
+      "properties": {
+        "scanId": {
+          "$ref": "d#/Sid"
+        },
+        "outputDir": {
+          "type": "string"
+        },
+        "partial": {
+          "type": "boolean"
+        },
+        "summary": {
+          "$ref": "d#/Sum"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "format",
+              "path",
+              "bytes",
+              "sha256"
+            ],
+            "properties": {
+              "format": {
+                "enum": [
+                  "md",
+                  "json",
+                  "sarif"
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "bytes": {
+                "$ref": "d#/N"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "list_scanners": {
+    "input": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "serverVersion",
+        "rulesetHash",
+        "scanners",
+        "advisoryDb",
+        "networkAllowed",
+        "limits"
+      ],
+      "properties": {
+        "serverVersion": {
+          "type": "string"
+        },
+        "rulesetHash": {
+          "type": "string"
+        },
+        "scanners": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "version",
+              "ruleCount",
+              "enabledByDefault",
+              "requiresAdvisoryDb"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "d#/Scn"
+              },
+              "version": {
+                "type": "string"
+              },
+              "ruleCount": {
+                "$ref": "d#/N"
+              },
+              "enabledByDefault": {
+                "type": "boolean"
+              },
+              "requiresAdvisoryDb": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "advisoryDb": {
+          "type": "object",
+          "required": [
+            "present"
+          ],
+          "properties": {
+            "present": {
+              "type": "boolean"
+            },
+            "generatedAt": {
+              "type": "string"
+            },
+            "ageDays": {
+              "$ref": "d#/N"
+            },
+            "stale": {
+              "type": "boolean"
+            }
+          }
+        },
+        "networkAllowed": {
+          "type": "boolean"
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maxFiles",
+            "maxFileBytes",
+            "maxTotalBytes",
+            "maxFindings",
+            "timeoutMs",
+            "getFindingsMax",
+            "maxRunning",
+            "maxQueued"
+          ],
+          "properties": {
+            "maxFiles": {
+              "$ref": "d#/Lim"
+            },
+            "maxFileBytes": {
+              "$ref": "d#/Lim"
+            },
+            "maxTotalBytes": {
+              "$ref": "d#/Lim"
+            },
+            "maxFindings": {
+              "$ref": "d#/Lim"
+            },
+            "timeoutMs": {
+              "$ref": "d#/Lim"
+            },
+            "getFindingsMax": {
+              "$ref": "d#/N"
+            },
+            "maxRunning": {
+              "$ref": "d#/N"
+            },
+            "maxQueued": {
+              "$ref": "d#/N"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,173 @@
+[
+  {
+    "mechanism": "Symlink skip",
+    "tests": [
+      "symlink loop a->."
+    ]
+  },
+  {
+    "mechanism": "`node_modules/` skip",
+    "tests": [
+      "node_modules is walked when an includeGlobs entry matches it"
+    ]
+  },
+  {
+    "mechanism": "RE2 only",
+    "tests": [
+      "section 11 RE2-only row: lookaround pattern is rejected",
+      "section 11 RE2-only row: backreference pattern is rejected"
+    ]
+  },
+  {
+    "mechanism": "RE2 PER_FILE_BUDGET_MS",
+    "tests": [
+      "fake clock past PER_FILE_BUDGET_MS"
+    ]
+  },
+  {
+    "mechanism": "assertNoSecrets",
+    "tests": [
+      "innocent text sharing a LEAK_SUBSTR (5) char substring"
+    ]
+  },
+  {
+    "mechanism": "Allowed roots,reserved names",
+    "tests": [
+      "path outside VULN_MCP_ALLOWED_ROOTS",
+      "reserved segments CON and COM1"
+    ]
+  },
+  {
+    "mechanism": "`strictLimits`",
+    "tests": [
+      "maxFindings=3, strictLimits true"
+    ]
+  },
+  {
+    "mechanism": "MAX_RUNNING/MAX_QUEUED",
+    "tests": [
+      "T-05 queue full"
+    ]
+  },
+  {
+    "mechanism": "`fstat` recheck",
+    "tests": [
+      "file swapped for a symlink after listing"
+    ]
+  },
+  {
+    "mechanism": "E_OUTPUT_DIR_UNSAFE",
+    "tests": [
+      "section 11 E_OUTPUT_DIR_UNSAFE row"
+    ]
+  },
+  {
+    "mechanism": "`sanitize`",
+    "tests": [
+      "<b> is escaped to &lt;b&gt;"
+    ]
+  },
+  {
+    "mechanism": "Binary/oversize skip",
+    "tests": [
+      "NUL at byte 10",
+      "file of maxFileBytes+1 bytes"
+    ]
+  },
+  {
+    "mechanism": "LINE_MAX minified skip",
+    "tests": [
+      "section 11 LINE_MAX row"
+    ]
+  },
+  {
+    "mechanism": "`.gitignore` skip",
+    "tests": [
+      ".gitignore matches are skipped when respectGitignore=true"
+    ]
+  },
+  {
+    "mechanism": "Placeholder/`.env.example` skip",
+    "tests": [
+      "a high-entropy token inside a file named .env.example produces 0 findings"
+    ]
+  },
+  {
+    "mechanism": "Dedupe to `relatedRuleIds`",
+    "tests": [
+      "same scanner+path+line with intersecting CWE sets merge"
+    ]
+  },
+  {
+    "mechanism": "Reject out-of-range,no clamp",
+    "tests": [
+      "no clamp"
+    ]
+  },
+  {
+    "mechanism": "Terminal jobs never reused",
+    "tests": [
+      "terminal jobs are never reused"
+    ]
+  },
+  {
+    "mechanism": "JOB_KEEP eviction",
+    "tests": [
+      "the oldest scanId after JOB_KEEP+1"
+    ]
+  },
+  {
+    "mechanism": "Stale-cursor rejection",
+    "tests": [
+      "E_CURSOR_STALE with retryable true"
+    ]
+  },
+  {
+    "mechanism": "SECRET_MIN_LEN/ENT_*_MILLI thresholds",
+    "tests": [
+      "T-03 entropy above threshold"
+    ]
+  },
+  {
+    "mechanism": "MAX_DEPTH",
+    "tests": [
+      "depth beyond MAX_DEPTH (64)"
+    ]
+  },
+  {
+    "mechanism": "REDACT_PREFIX",
+    "tests": [
+      "redact of a 7-char value returns"
+    ]
+  },
+  {
+    "mechanism": "Shard hash-mismatch ignore",
+    "tests": [
+      "shard with wrong contentSha256"
+    ]
+  },
+  {
+    "mechanism": "CANCEL_DRAIN_MS forced abort",
+    "tests": [
+      "T-08 B (F-09a)"
+    ]
+  },
+  {
+    "mechanism": "`allowPartial` false",
+    "tests": [
+      "timed_out job with allowPartial false"
+    ]
+  },
+  {
+    "mechanism": "requestKey reuse",
+    "tests": [
+      "T-05 reuse"
+    ]
+  },
+  {
+    "mechanism": "Online mode egress",
+    "tests": [
+      "online=true without VULN_MCP_ALLOW_NETWORK"
+    ]
+  }
+]
